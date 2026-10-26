@@ -11,6 +11,8 @@
     "start:dev": "foreman start -f ./Procfile.dev",
     "start:test": "RAILS_ENV=test foreman start -f ./Procfile.test",
     "dev": "overmind start -f ./Procfile.dev",
+    "dev:rust": "./bin/dev-rust",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "ruby:prettier": "bundle exec rubocop -a",
     "build:sdk": "vite build --config vite.lib.config.ts",
     "analyze:bundles": "pnpm analyze:bundle:sdk && pnpm analyze:bundle:widget",

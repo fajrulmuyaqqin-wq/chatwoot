@@ -1,0 +1,2 @@
+backend: PORT=3000 ./backend/target/release/chatwoot-backend
+vite: pnpm exec vite --port 3036

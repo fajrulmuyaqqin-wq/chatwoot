@@ -13,5 +13,17 @@ export default defineConfig({
       },
     },
   },
+  legacy: {
+    skipWebSocketTokenCheck: true,
+  },
+  server: {
+    cors: true,
+    allowedHosts: true,
+    hmr: {
+      host: 'localhost',
+      port: 3036,
+      clientPort: 3036,
+    },
+  },
   resolve: { alias: aliases },
 });

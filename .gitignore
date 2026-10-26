@@ -108,3 +108,10 @@ Procfile.worktree
 
 # Cache that `rake ruby_llm:refresh_models` writes next to the model registry
 config/llm_models.json.published.json
+
+# Rust Backend
+/backend/target
+/backend/.env
+/backend/storage/uploads/*
+!/backend/storage/uploads/.keep
+

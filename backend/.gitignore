@@ -1,0 +1,4 @@
+/target
+.env
+/storage/uploads/*
+!/storage/uploads/.keep

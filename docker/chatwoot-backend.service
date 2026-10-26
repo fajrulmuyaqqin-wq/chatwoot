@@ -1,0 +1,33 @@
+[Unit]
+Description=Chatwoot High-Performance Rust Backend Service
+Documentation=https://github.com/chatwoot/chatwoot
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=chatwoot
+Group=chatwoot
+WorkingDirectory=/opt/chatwoot
+ExecStart=/opt/chatwoot/bin/chatwoot-backend
+Restart=always
+RestartSec=5s
+
+# Environment configuration
+EnvironmentFile=/opt/chatwoot/.env.production
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+Environment=RUST_LOG=info
+Environment=PUBLIC_DIR=/opt/chatwoot/public
+Environment=STORAGE_DIR=/opt/chatwoot/storage
+
+# Resource limits & process sandboxing
+LimitNOFILE=65535
+TimeoutStopSec=15
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

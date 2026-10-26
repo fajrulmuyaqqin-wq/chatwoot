@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Chatwoot Dev Launcher (Rust Backend + Vite Frontend)
+# Zero Redis, Zero Sidekiq, Lightning-fast Tokio Runtime
+# ==============================================================================
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${PROJECT_ROOT}"
+
+# Warna konsol
+C_RESET='\033[0m'
+C_CYAN='\033[0;36m'
+C_GREEN='\033[0;32m'
+C_YELLOW='\033[0;33m'
+C_RED='\033[0;31m'
+C_BLUE='\033[0;34m'
+
+echo -e "${C_CYAN}====================================================================${C_RESET}"
+echo -e "${C_GREEN}  🚀 Starting Chatwoot Unified Development Stack (Rust + Vite)     ${C_RESET}"
+echo -e "${C_CYAN}====================================================================${C_RESET}"
+echo -e "${C_BLUE}• Architecture :${C_RESET} Axum 0.7 + Tokio + SQLx (PostgreSQL)"
+echo -e "${C_BLUE}• Optimization :${C_RESET} Zero Redis, Zero Sidekiq (Tokio In-Memory Engine)"
+echo -e "${C_BLUE}• Frontend     :${C_RESET} Vue 3 + Vite HMR on port 3036"
+echo -e "${C_BLUE}• App URL      :${C_RESET} ${C_GREEN}http://localhost:${PORT:-3000}/app${C_RESET}"
+echo -e "${C_CYAN}--------------------------------------------------------------------${C_RESET}"
+
+# Load environment from backend/.env if available
+if [[ -f "${PROJECT_ROOT}/backend/.env" ]]; then
+    set -a
+    source "${PROJECT_ROOT}/backend/.env"
+    set +a
+elif [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    set -a
+    source "${PROJECT_ROOT}/.env"
+    set +a
+fi
+
+# Development Ports & URLs (Force dev port 3000 unless PORT_OVERRIDE specified)
+export PORT="${PORT_OVERRIDE:-3000}"
+export HOST="${HOST:-0.0.0.0}"
+export FRONTEND_URL="http://localhost:${PORT}"
+export DATABASE_URL="${DATABASE_URL:-postgres://postgres:GantiPasswordPostgresYangSangatKuatDanPanjang123!@localhost:5432/chatwoot_dev}"
+
+# Omnichannel Credentials
+export WHATSAPP_APP_SECRET="${WHATSAPP_APP_SECRET:-test_app_secret_123}"
+export WHATSAPP_VERIFY_TOKEN="${WHATSAPP_VERIFY_TOKEN:-chatwoot_wa_verify_token_123}"
+export INSTAGRAM_APP_SECRET="${INSTAGRAM_APP_SECRET:-ig_app_secret_indonesia_2026}"
+export INSTAGRAM_VERIFY_TOKEN="${INSTAGRAM_VERIFY_TOKEN:-chatwoot_instagram_token}"
+export FB_APP_SECRET="${FB_APP_SECRET:-fb_app_secret_indonesia_2026}"
+export FB_VERIFY_TOKEN="${FB_VERIFY_TOKEN:-chatwoot_fb_token}"
+export TOKOPEDIA_APP_SECRET="${TOKOPEDIA_APP_SECRET:-tokopedia_secret_indonesia_2026}"
+
+# Graceful cleanup on exit
+cleanup() {
+    echo -e "\n${C_YELLOW}🛑 Stopping all Chatwoot dev processes...${C_RESET}"
+    if [[ -n "${BACKEND_PID:-}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
+        kill "${BACKEND_PID}" 2>/dev/null || true
+    fi
+    if [[ -n "${VITE_PID:-}" ]] && kill -0 "${VITE_PID}" 2>/dev/null; then
+        kill "${VITE_PID}" 2>/dev/null || true
+    fi
+    wait 2>/dev/null || true
+    echo -e "${C_GREEN}✅ All processes terminated cleanly.${C_RESET}"
+}
+trap cleanup SIGINT SIGTERM EXIT
+
+# 1. Start Vite Frontend Dev Server (port 3036)
+echo -e "${C_BLUE}[1/2] Launching Vite Dev Server on port 3036...${C_RESET}"
+pnpm exec vite --port 3036 --host 0.0.0.0 2>&1 | sed -e "s/^/${C_CYAN}[vite]${C_RESET} /" &
+VITE_PID=$!
+
+# Tunggu sebentar agar socket Vite terbuka
+sleep 1.5
+
+# 2. Start Rust Backend Server (port 3000)
+RUST_BIN="${PROJECT_ROOT}/backend/target/release/chatwoot-backend"
+if [[ ! -f "${RUST_BIN}" ]]; then
+    echo -e "${C_YELLOW}Binary release belum ada. Mengompilasi binary release...${C_RESET}"
+    cargo build --release --manifest-path "${PROJECT_ROOT}/backend/Cargo.toml"
+fi
+
+echo -e "${C_GREEN}[2/2] Launching Rust Backend Server on port ${PORT}...${C_RESET}"
+if [[ "${DEV_RELOAD:-0}" == "1" ]]; then
+    echo -e "${C_YELLOW}(DEV_RELOAD=1 aktif: Menjalankan via cargo run untuk auto-recompile)${C_RESET}"
+    cargo run --manifest-path "${PROJECT_ROOT}/backend/Cargo.toml" 2>&1 | sed -e "s/^/${C_GREEN}[rust]${C_RESET} /" &
+    BACKEND_PID=$!
+else
+    "${RUST_BIN}" 2>&1 | sed -e "s/^/${C_GREEN}[rust]${C_RESET} /" &
+    BACKEND_PID=$!
+fi
+
+echo -e "\n${C_GREEN}✨ Chatwoot siap digunakan! Buka browser:${C_RESET} ${C_CYAN}http://localhost:${PORT}/app${C_RESET}\n"
+
+# Tunggu proses background
+wait "${BACKEND_PID}" "${VITE_PID}"

@@ -1,0 +1,65 @@
+# Production Docker Compose for Chatwoot Rust Backend
+# Minimalist Architecture: Zero Redis, Zero Sidekiq, 100% Rust + PostgreSQL
+
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # Chatwoot High-Performance Rust Backend (Axum + Tokio + SQLx)
+  # Memory consumption: ~14 - 30 MB (vs 1.2 GB Rails Puma + Sidekiq)
+  # ----------------------------------------------------------------------------
+  chatwoot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rust
+    image: chatwoot-rust:latest
+    container_name: chatwoot-rust-app
+    restart: always
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env.production
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - RUST_LOG=info
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-chatwoot_secure_pass_2026}@postgres:5432/chatwoot_production
+    volumes:
+      - chatwoot_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          memory: 64M
+
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database (with pgvector support for AI Embeddings & RAG)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: chatwoot-postgres-db
+    restart: always
+    environment:
+      - POSTGRES_DB=chatwoot_production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-chatwoot_secure_pass_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chatwoot_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - '127.0.0.1:5432:5432'
+
+volumes:
+  chatwoot_storage:
+    name: chatwoot_production_storage
+  postgres_data:
+    name: chatwoot_production_postgres_data
