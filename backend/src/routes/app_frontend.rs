@@ -59,6 +59,9 @@ pub async fn render_vue_app(
         "entrypoints/dashboard.js"
     };
 
+    let fb_app_id = std::env::var("FB_APP_ID").unwrap_or_else(|_| "100234567890123".to_string());
+    let instagram_app_id = std::env::var("INSTAGRAM_APP_ID").unwrap_or_else(|_| "100234567890123".to_string());
+
     // Menghasilkan HTML bootstrap yang menginjeksi seluruh konfigurasi global ke window
     let html = format!(
         r#"<!DOCTYPE html>
@@ -78,8 +81,8 @@ pub async fn render_vue_app(
       window.chatwootConfig = {{
         hostURL: "{host_url}",
         helpCenterURL: "",
-        fbAppId: "",
-        instagramAppId: "",
+        fbAppId: "{fb_app_id}",
+        instagramAppId: "{instagram_app_id}",
         tiktokAppId: "",
         googleOAuthClientId: null,
         googleOAuthCallbackUrl: null,

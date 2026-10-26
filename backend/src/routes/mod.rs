@@ -11,6 +11,7 @@ pub mod campaigns;
 pub mod canned_responses;
 pub mod captain;
 pub mod calls;
+pub mod callbacks;
 pub mod companies;
 pub mod copilot;
 
@@ -112,6 +113,13 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             "/inbox_members/:inbox_id",
             get(inboxes::get_inbox_members),
         )
+        // Meta Facebook Pages Callbacks
+        .route("/callbacks/facebook_pages.json", post(callbacks::fetch_facebook_pages))
+        .route("/callbacks/facebook_pages", post(callbacks::fetch_facebook_pages))
+        .route("/callbacks/register_facebook_page", post(callbacks::register_facebook_page))
+        .route("/callbacks/reauthorize_page", post(callbacks::reauthorize_facebook_page))
+        // Instagram Authorization
+        .route("/instagram/authorization", post(callbacks::instagram_authorization))
         .route(
             "/contacts",
             get(contacts::list_contacts).post(contacts::create_contact),
@@ -992,6 +1000,11 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         .route(
             "/bot",
             get(webhooks::facebook::verify_webhook).post(webhooks::facebook::process_webhook),
+        )
+        // Instagram OAuth Callback
+        .route(
+            "/instagram/callback",
+            get(callbacks::instagram_callback),
         )
         // Devise Auth endpoints
         .nest("/auth", auth_routes)
