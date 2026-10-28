@@ -144,6 +144,15 @@ pub async fn process_global_webhook(
 
             match channel_and_inbox {
                 Some((channel, inbox)) => {
+                    // Tenant Rate Limiting (Token Bucket) - Mitigasi Noisy Neighbor
+                    if !state.check_tenant_webhook_rate_limit(channel.account_id) {
+                        warn!(
+                            "Tenant account_id={} exceeded webhook rate limit! Throttling event to protect other tenants.",
+                            channel.account_id
+                        );
+                        continue;
+                    }
+
                     ingest_whatsapp_value(&state, &channel, &inbox, value).await;
                     processed += 1;
                 }

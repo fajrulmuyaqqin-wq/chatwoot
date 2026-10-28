@@ -304,6 +304,7 @@ pub async fn create_message(
             if let Some(phone) = contact_phone {
                 let db_clone = state.db.clone();
                 let base_url = state.config.whatsapp_cloud_base_url.clone();
+                let secret_key_base = state.config.secret_key_base.clone();
                 let content_str = body.content.clone().unwrap_or_default();
                 let msg_id = new_message.id;
                 let inbox_id = conv.inbox_id;
@@ -318,6 +319,7 @@ pub async fn create_message(
                         &phone,
                         &content_str,
                         &base_url,
+                        &secret_key_base,
                     )
                     .await
                     {

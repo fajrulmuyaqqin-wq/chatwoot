@@ -100,6 +100,16 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     to.params?.accountId || redirectAccount?.id || accountId
   );
   const userAccount = accounts.find(a => a.id === routeAccountId);
+
+  // Multi-Tenant URL Tamper Protection:
+  // If the user navigates directly to an accountId they are not a member of (and not SuperAdmin),
+  // immediately bounce back to their legitimate primary account dashboard.
+  const isSuperAdmin = user.type === 'SuperAdmin';
+  if (to.params?.accountId && !userAccount && !isSuperAdmin) {
+    const fallbackAccountId = accountId || accounts[0]?.id;
+    return next(frontendURL(`accounts/${fallbackAccountId}/dashboard`));
+  }
+
   const isAdmin = userAccount?.role === 'administrator';
   const isActive = userAccount?.status === 'active';
   const needsShopifyBilling = isAdmin && requiresShopifyBilling(userAccount);

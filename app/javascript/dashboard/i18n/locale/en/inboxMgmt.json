@@ -431,6 +431,25 @@
             "SECURE_AUTH": "Secure OAuth based authentication",
             "AUTO_CONFIG": "Automatic webhook and phone number configuration"
           },
+          "STEPS": {
+            "TITLE": "How it works in 4 easy steps",
+            "STEP_1": {
+              "TITLE": "1. Launch Meta Signup",
+              "DESC": "Click the connect button below to open Meta's secure embedded popup."
+            },
+            "STEP_2": {
+              "TITLE": "2. Log In & Authorize",
+              "DESC": "Log into your Facebook/Meta account and grant WhatsApp permissions."
+            },
+            "STEP_3": {
+              "TITLE": "3. Select Business & Number",
+              "DESC": "Choose or register your WhatsApp Business profile and phone number."
+            },
+            "STEP_4": {
+              "TITLE": "4. Instant Automatic Setup",
+              "DESC": "Your inbox, webhooks, and routing are activated immediately with zero manual configuration."
+            }
+          },
           "LEARN_MORE": {
             "TEXT": "To learn more about quick setup, pricing, and limitations, visit {link}.",
             "LINK_TEXT": "this link"

@@ -55,6 +55,29 @@ const benefits = computed(() => [
   },
 ]);
 
+const onboardingSteps = computed(() => [
+  {
+    key: 'STEP_1',
+    title: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_1.TITLE'),
+    description: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_1.DESC'),
+  },
+  {
+    key: 'STEP_2',
+    title: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_2.TITLE'),
+    description: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_2.DESC'),
+  },
+  {
+    key: 'STEP_3',
+    title: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_3.TITLE'),
+    description: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_3.DESC'),
+  },
+  {
+    key: 'STEP_4',
+    title: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_4.TITLE'),
+    description: t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.STEP_4.DESC'),
+  },
+]);
+
 const showLoader = computed(() => isAuthenticating.value || isProcessing.value);
 
 const enableCallingForInbox = async inboxId => {
@@ -153,6 +176,38 @@ const launchEmbeddedSignup = async () => {
         <p class="text-sm leading-[24px] text-n-slate-12">
           {{ $t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.DESC') }}
         </p>
+      </div>
+
+      <!-- Onboarding Steps Guide -->
+      <div
+        class="w-full p-4 mb-6 border rounded-xl border-n-weak bg-n-surface-2 text-start"
+      >
+        <h4
+          class="mb-3 text-xs font-semibold tracking-wider uppercase text-n-slate-11"
+        >
+          {{ $t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.STEPS.TITLE') }}
+        </h4>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div
+            v-for="(step, index) in onboardingSteps"
+            :key="step.key"
+            class="flex items-start gap-3 p-3 rounded-lg bg-n-surface-1 border border-n-weak/50"
+          >
+            <div
+              class="flex items-center justify-center flex-shrink-0 size-6 text-xs font-semibold rounded-full bg-n-brand/10 text-n-brand"
+            >
+              {{ index + 1 }}
+            </div>
+            <div class="flex flex-col">
+              <span class="text-sm font-medium text-n-slate-12">
+                {{ step.title }}
+              </span>
+              <span class="text-xs text-n-slate-11 mt-0.5">
+                {{ step.description }}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="flex flex-col gap-2 mb-6">

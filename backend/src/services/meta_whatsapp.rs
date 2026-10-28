@@ -247,6 +247,7 @@ pub async fn send_outgoing_message(
     to_phone: &str,
     content: &str,
     base_url: &str,
+    secret_key_base: &str,
 ) -> Result<String, String> {
     // 1. Ambil data inbox dan pastikan merupakan Channel::Whatsapp
     let inbox = sqlx::query_as::<_, Inbox>("SELECT * FROM inboxes WHERE id = $1")
@@ -271,9 +272,13 @@ pub async fn send_outgoing_message(
     let phone_number_id = channel
         .phone_number_id()
         .ok_or_else(|| "phone_number_id not found in provider_config".to_string())?;
-    let api_key = channel
+    let raw_api_key = channel
         .api_key()
         .ok_or_else(|| "api_key not found in provider_config".to_string())?;
+
+    let decrypted_key = crate::services::crypto::decrypt_sensitive_token(raw_api_key, secret_key_base)
+        .unwrap_or_else(|_| raw_api_key.to_string());
+    let api_key = decrypted_key.as_str();
 
     // Jika api_key adalah mock (misal di testing), return simulated wamid
     if api_key.starts_with("mock_") || api_key.starts_with("EAAG_MOCK_") {

@@ -342,6 +342,7 @@ pub struct WhatsAppAuthorizationPayload {
     pub business_id: Option<String>,
     pub waba_id: String,
     pub phone_number_id: Option<String>,
+    pub phone_number: Option<String>,
     pub is_coexistence: Option<bool>,
     pub inbox_id: Option<i32>,
 }
@@ -395,7 +396,7 @@ pub async fn whatsapp_authorization(
     };
 
     // 4. Ambil informasi nomor telepon dari Meta Graph API
-    let phone_info = match crate::services::meta_whatsapp::fetch_phone_number_details(
+    let mut phone_info = match crate::services::meta_whatsapp::fetch_phone_number_details(
         &access_token,
         &payload.waba_id,
         payload.phone_number_id.as_deref(),
@@ -410,6 +411,12 @@ pub async fn whatsapp_authorization(
             ).into_response();
         }
     };
+
+    if let Some(custom_phone) = payload.phone_number {
+        if !custom_phone.trim().is_empty() {
+            phone_info.phone_number = custom_phone;
+        }
+    }
 
     // 5. Daftarkan WABA ke Webhook App (subscribed_apps)
     if let Err(err) = crate::services::meta_whatsapp::subscribe_waba_to_app(
@@ -432,9 +439,15 @@ pub async fn whatsapp_authorization(
         }
     };
 
-    // Provider config JSON
+    // Enkripsi token menggunakan kunci simetris AES-256-GCM berbasis secret_key_base
+    let encrypted_token = crate::services::crypto::encrypt_sensitive_token(
+        &access_token,
+        &state.config.secret_key_base,
+    ).unwrap_or_else(|_| access_token.clone());
+
+    // Provider config JSON dengan token terenkripsi
     let provider_config = json!({
-        "api_key": access_token,
+        "api_key": encrypted_token,
         "phone_number_id": phone_info.phone_number_id,
         "business_account_id": payload.waba_id,
         "business_id": payload.business_id,
@@ -481,7 +494,7 @@ pub async fn whatsapp_authorization(
             "#
         )
         .bind(&provider_config)
-        .bind(&access_token)
+        .bind(&encrypted_token)
         .bind(inbox.channel_id)
         .execute(&mut *tx)
         .await;
@@ -549,7 +562,7 @@ pub async fn whatsapp_authorization(
                 "#
             )
             .bind(&provider_config)
-            .bind(&access_token)
+            .bind(&encrypted_token)
             .bind(ch.id)
             .execute(&mut *tx)
             .await;
@@ -608,7 +621,7 @@ pub async fn whatsapp_authorization(
                 account_id,
                 phone_info.phone_number,
                 provider_config,
-                access_token
+                encrypted_token
             )
             .fetch_one(&mut *tx)
             .await;
