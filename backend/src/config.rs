@@ -9,12 +9,17 @@ pub struct Config {
     pub frontend_url: String,
     pub secret_key_base: String,
     pub max_db_connections: u32,
+    pub whatsapp_app_id: Option<String>,
     pub whatsapp_app_secret: Option<String>,
+    pub whatsapp_configuration_id: Option<String>,
     pub whatsapp_verify_token: Option<String>,
+    pub whatsapp_api_version: String,
     pub whatsapp_cloud_base_url: String,
+    pub instagram_app_id: Option<String>,
     pub instagram_app_secret: Option<String>,
     pub instagram_verify_token: Option<String>,
     pub instagram_graph_base_url: String,
+    pub fb_app_id: Option<String>,
     pub fb_app_secret: Option<String>,
     pub fb_verify_token: Option<String>,
     pub fb_graph_base_url: String,
@@ -62,11 +67,37 @@ impl Config {
             .and_then(|c| c.parse::<u32>().ok())
             .unwrap_or(10);
 
-        let whatsapp_app_secret = env::var("WHATSAPP_APP_SECRET").ok();
+        let fb_app_id = env::var("FB_APP_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let fb_app_secret = env::var("FB_APP_SECRET").ok();
+        let fb_verify_token = env::var("FB_VERIFY_TOKEN")
+            .or_else(|_| env::var("FACEBOOK_VERIFY_TOKEN"))
+            .ok();
+        let fb_graph_base_url = env::var("FB_GRAPH_BASE_URL")
+            .unwrap_or_else(|_| "https://graph.facebook.com".to_string());
+
+        let whatsapp_app_id = env::var("WHATSAPP_APP_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| fb_app_id.clone());
+        let whatsapp_app_secret = env::var("WHATSAPP_APP_SECRET")
+            .or_else(|_| env::var("FB_APP_SECRET"))
+            .ok();
+        let whatsapp_configuration_id = env::var("WHATSAPP_CONFIGURATION_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
         let whatsapp_verify_token = env::var("WHATSAPP_VERIFY_TOKEN").ok();
+        let whatsapp_api_version = env::var("WHATSAPP_API_VERSION")
+            .unwrap_or_else(|_| "v22.0".to_string());
         let whatsapp_cloud_base_url = env::var("WHATSAPP_CLOUD_BASE_URL")
             .unwrap_or_else(|_| "https://graph.facebook.com".to_string());
 
+        let instagram_app_id = env::var("INSTAGRAM_APP_ID")
+            .or_else(|_| env::var("IG_APP_ID"))
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| fb_app_id.clone());
         let instagram_app_secret = env::var("INSTAGRAM_APP_SECRET")
             .or_else(|_| env::var("IG_APP_SECRET"))
             .or_else(|_| env::var("FB_APP_SECRET"))
@@ -76,13 +107,6 @@ impl Config {
             .ok();
         let instagram_graph_base_url = env::var("INSTAGRAM_GRAPH_BASE_URL")
             .unwrap_or_else(|_| "https://graph.instagram.com".to_string());
-
-        let fb_app_secret = env::var("FB_APP_SECRET").ok();
-        let fb_verify_token = env::var("FB_VERIFY_TOKEN")
-            .or_else(|_| env::var("FACEBOOK_VERIFY_TOKEN"))
-            .ok();
-        let fb_graph_base_url = env::var("FB_GRAPH_BASE_URL")
-            .unwrap_or_else(|_| "https://graph.facebook.com".to_string());
 
         let telegram_api_base_url = env::var("TELEGRAM_API_BASE_URL")
             .unwrap_or_else(|_| "https://api.telegram.org".to_string());
@@ -110,12 +134,17 @@ impl Config {
             frontend_url,
             secret_key_base,
             max_db_connections,
+            whatsapp_app_id,
             whatsapp_app_secret,
+            whatsapp_configuration_id,
             whatsapp_verify_token,
+            whatsapp_api_version,
             whatsapp_cloud_base_url,
+            instagram_app_id,
             instagram_app_secret,
             instagram_verify_token,
             instagram_graph_base_url,
+            fb_app_id,
             fb_app_secret,
             fb_verify_token,
             fb_graph_base_url,
@@ -139,5 +168,6 @@ mod tests {
         assert_eq!(config.port, 3000);
         assert!(!config.database_url.is_empty());
         assert!(!config.secret_key_base.is_empty());
+        assert_eq!(config.whatsapp_api_version, "v22.0");
     }
 }

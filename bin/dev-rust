@@ -42,13 +42,18 @@ export HOST="${HOST:-0.0.0.0}"
 export FRONTEND_URL="http://localhost:${PORT}"
 export DATABASE_URL="${DATABASE_URL:-postgres://postgres:GantiPasswordPostgresYangSangatKuatDanPanjang123!@localhost:5432/chatwoot_dev}"
 
-# Omnichannel Credentials
-export WHATSAPP_APP_SECRET="${WHATSAPP_APP_SECRET:-test_app_secret_123}"
-export WHATSAPP_VERIFY_TOKEN="${WHATSAPP_VERIFY_TOKEN:-chatwoot_wa_verify_token_123}"
-export INSTAGRAM_APP_SECRET="${INSTAGRAM_APP_SECRET:-ig_app_secret_indonesia_2026}"
-export INSTAGRAM_VERIFY_TOKEN="${INSTAGRAM_VERIFY_TOKEN:-chatwoot_instagram_token}"
+# Omnichannel & Meta Embedded Signup Credentials (Multi-tenant Platform defaults)
+export FB_APP_ID="${FB_APP_ID:-test_meta_app_id_123456}"
 export FB_APP_SECRET="${FB_APP_SECRET:-fb_app_secret_indonesia_2026}"
 export FB_VERIFY_TOKEN="${FB_VERIFY_TOKEN:-chatwoot_fb_token}"
+export WHATSAPP_APP_ID="${WHATSAPP_APP_ID:-${FB_APP_ID}}"
+export WHATSAPP_APP_SECRET="${WHATSAPP_APP_SECRET:-test_app_secret_123}"
+export WHATSAPP_CONFIGURATION_ID="${WHATSAPP_CONFIGURATION_ID:-test_config_id_987654}"
+export WHATSAPP_VERIFY_TOKEN="${WHATSAPP_VERIFY_TOKEN:-chatwoot_wa_verify_token_123}"
+export WHATSAPP_API_VERSION="${WHATSAPP_API_VERSION:-v22.0}"
+export INSTAGRAM_APP_ID="${INSTAGRAM_APP_ID:-${FB_APP_ID}}"
+export INSTAGRAM_APP_SECRET="${INSTAGRAM_APP_SECRET:-ig_app_secret_indonesia_2026}"
+export INSTAGRAM_VERIFY_TOKEN="${INSTAGRAM_VERIFY_TOKEN:-chatwoot_instagram_token}"
 export TOKOPEDIA_APP_SECRET="${TOKOPEDIA_APP_SECRET:-tokopedia_secret_indonesia_2026}"
 
 # Graceful cleanup on exit

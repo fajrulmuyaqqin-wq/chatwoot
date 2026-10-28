@@ -59,8 +59,11 @@ pub async fn render_vue_app(
         "entrypoints/dashboard.js"
     };
 
-    let fb_app_id = std::env::var("FB_APP_ID").unwrap_or_else(|_| "100234567890123".to_string());
-    let instagram_app_id = std::env::var("INSTAGRAM_APP_ID").unwrap_or_else(|_| "100234567890123".to_string());
+    let fb_app_id = state.config.fb_app_id.as_deref().unwrap_or("100234567890123");
+    let instagram_app_id = state.config.instagram_app_id.as_deref().unwrap_or("100234567890123");
+    let whatsapp_app_id = state.config.whatsapp_app_id.as_deref().unwrap_or("");
+    let whatsapp_configuration_id = state.config.whatsapp_configuration_id.as_deref().unwrap_or("");
+    let whatsapp_api_version = &state.config.whatsapp_api_version;
 
     // Menghasilkan HTML bootstrap yang menginjeksi seluruh konfigurasi global ke window
     let html = format!(
@@ -88,9 +91,9 @@ pub async fn render_vue_app(
         googleOAuthCallbackUrl: null,
         allowedLoginMethods: ["email", "saml"],
         fbApiVersion: "v14.0",
-        whatsappAppId: "",
-        whatsappConfigurationId: "",
-        whatsappApiVersion: "v16.0",
+        whatsappAppId: "{whatsapp_app_id}",
+        whatsappConfigurationId: "{whatsapp_configuration_id}",
+        whatsappApiVersion: "{whatsapp_api_version}",
         signupEnabled: "true",
         isEnterprise: "true",
         isMfaEnabled: "true",
@@ -180,7 +183,12 @@ pub async fn render_vue_app(
 </html>
 "#,
         host_url = host_url,
-        entrypoint = entrypoint
+        entrypoint = entrypoint,
+        fb_app_id = fb_app_id,
+        instagram_app_id = instagram_app_id,
+        whatsapp_app_id = whatsapp_app_id,
+        whatsapp_configuration_id = whatsapp_configuration_id,
+        whatsapp_api_version = whatsapp_api_version
     );
 
     Html(html)
