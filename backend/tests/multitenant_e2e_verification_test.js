@@ -110,7 +110,10 @@ async function runMultiTenantTests() {
   }
   const t1AuthData = await t1AuthRes.json();
   console.log('✓ Tenant 1 Channel & Inbox authorized successfully:');
-  console.log(`  Inbox ID: ${t1AuthData.id}, Name: "${t1AuthData.name}", Phone: ${t1AuthData.phone_number}`);
+  console.log(`  Inbox ID: ${t1AuthData.id}, Name: "${t1AuthData.name}", Phone: ${t1AuthData.phone_number}, Channel Type: ${t1AuthData.channel_type}`);
+  if (t1AuthData.channel_type !== 'Channel::Whatsapp') {
+    throw new Error(`Expected channel_type to be 'Channel::Whatsapp', got ${t1AuthData.channel_type}`);
+  }
 
   // Verify in PostgreSQL that access token is stored ENCRYPTED with enc:
   const t1DbToken = queryDb(`SELECT business_management_token FROM channel_whatsapp WHERE phone_number = '${t1Phone}'`);

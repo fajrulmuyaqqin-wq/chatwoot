@@ -91,9 +91,23 @@ export const classifySignupEvent = data => {
   return { type: SIGNUP_RESULT.IGNORE };
 };
 
+export const isTrustedMetaOrigin = origin => {
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === 'facebook.com' ||
+      hostname.endsWith('.facebook.com') ||
+      hostname === 'meta.com' ||
+      hostname.endsWith('.meta.com')
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const createMessageHandler = onEmbeddedSignupData => {
   return event => {
-    if (!event.origin.endsWith('facebook.com')) return;
+    if (!isTrustedMetaOrigin(event.origin)) return;
 
     try {
       let data;

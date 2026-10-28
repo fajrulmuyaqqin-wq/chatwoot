@@ -35,13 +35,21 @@ export function useWhatsappEmbeddedSignup() {
       let settled = false;
       let messageHandler;
 
+      let timeoutId;
+
       const settle = (fn, value) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeoutId);
         window.removeEventListener('message', messageHandler);
         isAuthenticating.value = false;
         fn(value);
       };
+
+      // 120-second safety timeout to prevent permanent UI lockup if popup is blocked or hangs
+      timeoutId = setTimeout(() => {
+        settle(resolve, null);
+      }, 120000);
 
       // Both the auth code and the business data arrive asynchronously and in
       // no fixed order; only resolve once we're holding both.

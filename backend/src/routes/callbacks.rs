@@ -520,7 +520,7 @@ pub async fn whatsapp_authorization(
                 "success": true,
                 "id": inbox.id,
                 "name": inbox.name,
-                "channel_type": "whatsapp",
+                "channel_type": "Channel::Whatsapp",
                 "channel_id": inbox.channel_id,
                 "phone_number": phone_info.phone_number,
                 "message": "Inbox reauthorized successfully"
@@ -702,7 +702,7 @@ pub async fn whatsapp_authorization(
             "success": true,
             "id": inbox_id,
             "name": inbox_name,
-            "channel_type": "whatsapp",
+            "channel_type": "Channel::Whatsapp",
             "channel_id": channel_id,
             "phone_number": phone_info.phone_number
         })),

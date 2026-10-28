@@ -29,9 +29,9 @@ const { t } = useI18n();
 const isRequestingAuthorization = ref(false);
 const isLoadingFacebook = ref(true);
 
-const whatsappAppId = computed(() => window.chatwootConfig.whatsappAppId);
+const whatsappAppId = computed(() => window.chatwootConfig?.whatsappAppId);
 const whatsappConfigurationId = computed(
-  () => window.chatwootConfig.whatsappConfigurationId
+  () => window.chatwootConfig?.whatsappConfigurationId
 );
 
 const actionLabel = computed(() => {
@@ -121,12 +121,19 @@ const startEmbeddedSignup = () => {
   let pendingEvent = null;
   let messageHandler;
   let settled = false;
+  let timeoutId;
 
   const settle = () => {
     if (settled) return;
     settled = true;
+    clearTimeout(timeoutId);
     window.removeEventListener('message', messageHandler);
   };
+
+  timeoutId = setTimeout(() => {
+    settle();
+    isRequestingAuthorization.value = false;
+  }, 120000);
 
   const process = () => {
     if (!authCode || !pendingEvent) return;
@@ -166,11 +173,18 @@ const startEmbeddedSignup = () => {
 // startEmbeddedSignup above, just without needing to buffer the event's business data.
 const createFinishEventWaiter = () => {
   let listener;
+  let timeoutId;
   const promise = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      window.removeEventListener('message', listener);
+      reject(new Error(t('INBOX_MGMT.ADD.WHATSAPP.EMBEDDED_SIGNUP.CANCELLED')));
+    }, 120000);
+
     listener = createMessageHandler(data => {
       const result = classifySignupEvent(data);
       if (result.type === SIGNUP_RESULT.IGNORE) return;
 
+      clearTimeout(timeoutId);
       window.removeEventListener('message', listener);
 
       if (result.type === SIGNUP_RESULT.FINISH) {
@@ -198,16 +212,22 @@ const createFinishEventWaiter = () => {
   });
   return {
     promise,
-    cleanup: () => window.removeEventListener('message', listener),
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('message', listener);
+    },
   };
 };
 
 const handleLoginAndReauthorize = async () => {
   // Validate required configuration
-  if (!whatsappAppId.value) {
+  if (!whatsappAppId.value || whatsappAppId.value === 'none') {
     throw new Error('WhatsApp App ID is required');
   }
-  if (!whatsappConfigurationId.value) {
+  if (
+    !whatsappConfigurationId.value ||
+    whatsappConfigurationId.value === 'none'
+  ) {
     throw new Error('WhatsApp Configuration ID is required');
   }
 

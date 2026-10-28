@@ -36,9 +36,12 @@ const PROVIDER_TYPES = {
 };
 
 const hasWhatsappAppId = computed(() => {
-  return (
-    window.chatwootConfig?.whatsappAppId &&
-    window.chatwootConfig.whatsappAppId !== 'none'
+  const cfg = window.chatwootConfig;
+  return Boolean(
+    cfg?.whatsappAppId &&
+      cfg.whatsappAppId !== 'none' &&
+      cfg?.whatsappConfigurationId &&
+      cfg.whatsappConfigurationId !== 'none'
   );
 });
 
