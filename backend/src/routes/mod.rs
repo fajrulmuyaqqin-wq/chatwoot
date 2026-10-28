@@ -928,6 +928,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
     // Webhook routes (Public endpoints for external channels: WhatsApp, Instagram, Facebook, Telegram, Shopee)
     let webhook_routes = Router::new()
         .route(
+            "/whatsapp",
+            get(webhooks::whatsapp::verify_global_webhook).post(webhooks::whatsapp::process_global_webhook),
+        )
+        .route(
             "/whatsapp/:phone_number",
             get(webhooks::whatsapp::verify_webhook).post(webhooks::whatsapp::process_webhook),
         )
