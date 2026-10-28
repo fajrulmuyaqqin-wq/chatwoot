@@ -122,6 +122,8 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         .route("/callbacks/reauthorize_page", post(callbacks::reauthorize_facebook_page))
         // Instagram Authorization
         .route("/instagram/authorization", post(callbacks::instagram_authorization))
+        // WhatsApp Embedded Signup Authorization
+        .route("/whatsapp/authorization", post(callbacks::whatsapp_authorization))
         .route(
             "/contacts",
             get(contacts::list_contacts).post(contacts::create_contact),

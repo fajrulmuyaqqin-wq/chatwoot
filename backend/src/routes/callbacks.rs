@@ -335,3 +335,363 @@ pub async fn instagram_callback(
     let target = format!("/app/accounts/{}/settings/inboxes/new/{}/agents", account_id, inbox_id);
     Redirect::to(&target)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct WhatsAppAuthorizationPayload {
+    pub code: String,
+    pub business_id: Option<String>,
+    pub waba_id: String,
+    pub phone_number_id: Option<String>,
+    pub is_coexistence: Option<bool>,
+    pub inbox_id: Option<i32>,
+}
+
+/// POST /api/v1/accounts/:account_id/whatsapp/authorization
+/// Menangani initial authorization maupun reauthorization WhatsApp via Meta Embedded Signup
+pub async fn whatsapp_authorization(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+    Json(payload): Json<WhatsAppAuthorizationPayload>,
+) -> impl IntoResponse {
+    // 1. Verifikasi hak akses admin pada akun terkait
+    if let Err((code, msg)) =
+        verify_account_access(&state.db, &current_user, account_id, AccountRole::Administrator).await
+    {
+        return (code, Json(json!({ "success": false, "error": msg }))).into_response();
+    }
+
+    // 2. Validasi parameter input
+    if payload.code.trim().is_empty() || payload.waba_id.trim().is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "success": false,
+                "error": "Required parameters are missing: code, waba_id"
+            })),
+        ).into_response();
+    }
+
+    // 3. Tukar authorization code dengan access token
+    let app_id = state.config.whatsapp_app_id.as_deref().unwrap_or_default();
+    let app_secret = state.config.whatsapp_app_secret.as_deref().unwrap_or_default();
+    let api_version = &state.config.whatsapp_api_version;
+    let base_url = &state.config.whatsapp_cloud_base_url;
+
+    let access_token = match crate::services::meta_whatsapp::exchange_code_for_token(
+        app_id,
+        app_secret,
+        &payload.code,
+        api_version,
+        base_url,
+    ).await {
+        Ok(token) => token,
+        Err(err) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "success": false, "error": err })),
+            ).into_response();
+        }
+    };
+
+    // 4. Ambil informasi nomor telepon dari Meta Graph API
+    let phone_info = match crate::services::meta_whatsapp::fetch_phone_number_details(
+        &access_token,
+        &payload.waba_id,
+        payload.phone_number_id.as_deref(),
+        api_version,
+        base_url,
+    ).await {
+        Ok(info) => info,
+        Err(err) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "success": false, "error": err })),
+            ).into_response();
+        }
+    };
+
+    // 5. Daftarkan WABA ke Webhook App (subscribed_apps)
+    if let Err(err) = crate::services::meta_whatsapp::subscribe_waba_to_app(
+        &access_token,
+        &payload.waba_id,
+        api_version,
+        base_url,
+    ).await {
+        tracing::warn!("Failed to subscribe WABA to app webhook: {}", err);
+    }
+
+    // 6. Transaksi Database untuk Channel & Inbox
+    let mut tx = match state.db.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": format!("Database transaction error: {}", e) })),
+            ).into_response();
+        }
+    };
+
+    // Provider config JSON
+    let provider_config = json!({
+        "api_key": access_token,
+        "phone_number_id": phone_info.phone_number_id,
+        "business_account_id": payload.waba_id,
+        "business_id": payload.business_id,
+        "is_coexistence": payload.is_coexistence.unwrap_or(false),
+        "source": "embedded_signup"
+    });
+
+    // Periksa apakah ini alur reauthorization (inbox_id disediakan)
+    if let Some(inbox_id) = payload.inbox_id {
+        let existing_inbox = sqlx::query_as::<_, Inbox>(
+            "SELECT * FROM inboxes WHERE id = $1 AND account_id = $2"
+        )
+        .bind(inbox_id)
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await;
+
+        let inbox = match existing_inbox {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "success": false, "error": "Target inbox for reauthorization not found" })),
+                ).into_response();
+            }
+            Err(e) => {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "success": false, "error": e.to_string() })),
+                ).into_response();
+            }
+        };
+
+        // Update channel_whatsapp terkait
+        let update_channel = sqlx::query(
+            r#"
+            UPDATE channel_whatsapp
+            SET provider_config = $1,
+                business_management_token = $2,
+                updated_at = NOW()
+            WHERE id = $3
+            "#
+        )
+        .bind(&provider_config)
+        .bind(&access_token)
+        .bind(inbox.channel_id)
+        .execute(&mut *tx)
+        .await;
+
+        if let Err(e) = update_channel {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": format!("Failed to update channel: {}", e) })),
+            ).into_response();
+        }
+
+        if let Err(e) = tx.commit().await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": format!("Failed to commit transaction: {}", e) })),
+            ).into_response();
+        }
+
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "id": inbox.id,
+                "name": inbox.name,
+                "channel_type": "whatsapp",
+                "channel_id": inbox.channel_id,
+                "phone_number": phone_info.phone_number,
+                "message": "Inbox reauthorized successfully"
+            })),
+        ).into_response();
+    }
+
+    // Alur Initial Authorization / Pembuatan Channel & Inbox Baru
+    // Cek apakah nomor telepon sudah terdaftar di channel_whatsapp
+    let existing_channel = sqlx::query_as::<_, crate::models::channel_whatsapp::ChannelWhatsapp>(
+        "SELECT * FROM channel_whatsapp WHERE phone_number = $1"
+    )
+    .bind(&phone_info.phone_number)
+    .fetch_optional(&mut *tx)
+    .await;
+
+    let (channel_id, inbox_id, inbox_name) = match existing_channel {
+        Ok(Some(ch)) => {
+            // Jika nomor ini terdaftar di akun lain, tolak dengan 422
+            if ch.account_id != account_id {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "success": false,
+                        "error": format!("Phone number {} is already registered under another account", phone_info.phone_number)
+                    })),
+                ).into_response();
+            }
+
+            // Jika di akun yang sama, perbarui token dan ambil inbox yang sudah ada
+            let _ = sqlx::query(
+                r#"
+                UPDATE channel_whatsapp
+                SET provider_config = $1,
+                    business_management_token = $2,
+                    updated_at = NOW()
+                WHERE id = $3
+                "#
+            )
+            .bind(&provider_config)
+            .bind(&access_token)
+            .bind(ch.id)
+            .execute(&mut *tx)
+            .await;
+
+            let existing_inbox = sqlx::query_as::<_, Inbox>(
+                "SELECT * FROM inboxes WHERE channel_id = $1 AND account_id = $2"
+            )
+            .bind(ch.id)
+            .bind(account_id)
+            .fetch_optional(&mut *tx)
+            .await;
+
+            match existing_inbox {
+                Ok(Some(ib)) => (ch.id, ib.id, ib.name),
+                _ => {
+                    // Jika belum ada inbox record, buat inbox baru
+                    let name = format!("{} WhatsApp", phone_info.display_name);
+                    let new_inbox = sqlx::query!(
+                        r#"
+                        INSERT INTO inboxes (
+                            channel_id, account_id, name, channel_type,
+                            created_at, updated_at
+                        ) VALUES ($1, $2, $3, 'Channel::Whatsapp', NOW(), NOW())
+                        RETURNING id
+                        "#,
+                        ch.id,
+                        account_id,
+                        name
+                    )
+                    .fetch_one(&mut *tx)
+                    .await;
+
+                    match new_inbox {
+                        Ok(r) => (ch.id, r.id, name),
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({ "success": false, "error": e.to_string() })),
+                            ).into_response();
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            // Masukkan channel_whatsapp baru
+            let new_ch = sqlx::query!(
+                r#"
+                INSERT INTO channel_whatsapp (
+                    account_id, phone_number, provider, provider_config,
+                    business_management_token, created_at, updated_at
+                ) VALUES ($1, $2, 'whatsapp_cloud', $3, $4, NOW(), NOW())
+                RETURNING id
+                "#,
+                account_id,
+                phone_info.phone_number,
+                provider_config,
+                access_token
+            )
+            .fetch_one(&mut *tx)
+            .await;
+
+            let ch_id = match new_ch {
+                Ok(r) => r.id,
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "success": false, "error": format!("Failed to create channel: {}", e) })),
+                    ).into_response();
+                }
+            };
+
+            // Masukkan inboxes baru
+            let name = format!("{} WhatsApp", phone_info.display_name);
+            let new_inbox = sqlx::query!(
+                r#"
+                INSERT INTO inboxes (
+                    channel_id, account_id, name, channel_type,
+                    created_at, updated_at
+                ) VALUES ($1, $2, $3, 'Channel::Whatsapp', NOW(), NOW())
+                RETURNING id
+                "#,
+                ch_id,
+                account_id,
+                name
+            )
+            .fetch_one(&mut *tx)
+            .await;
+
+            let ib_id = match new_inbox {
+                Ok(r) => r.id,
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "success": false, "error": format!("Failed to create inbox: {}", e) })),
+                    ).into_response();
+                }
+            };
+
+            (ch_id, ib_id, name)
+        }
+        Err(e) => {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": e.to_string() })),
+            ).into_response();
+        }
+    };
+
+    // Tambahkan user saat ini sebagai anggota inbox awal (inbox_members)
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO inbox_members (inbox_id, user_id, created_at, updated_at)
+        VALUES ($1, $2, NOW(), NOW())
+        ON CONFLICT DO NOTHING
+        "#
+    )
+    .bind(inbox_id)
+    .bind(current_user.id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = tx.commit().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": format!("Failed to commit transaction: {}", e) })),
+        ).into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "success": true,
+            "id": inbox_id,
+            "name": inbox_name,
+            "channel_type": "whatsapp",
+            "channel_id": channel_id,
+            "phone_number": phone_info.phone_number
+        })),
+    ).into_response()
+}
