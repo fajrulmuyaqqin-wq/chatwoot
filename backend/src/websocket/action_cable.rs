@@ -154,8 +154,49 @@ async fn handle_cable_socket(socket: WebSocket, state: AppState) {
                                         let parsed_ident = serde_json::from_str::<RoomChannelIdentifier>(&client_cmd.identifier);
                                         match parsed_ident {
                                             Ok(room_params) if room_params.channel == "RoomChannel" => {
+                                                // Validasi autentikasi pubsub_token & izin akun
+                                                let is_authorized = match (&room_params.pubsub_token, room_params.account_id, room_params.user_id) {
+                                                    (Some(tok), Some(acc_id), Some(usr_id)) if !tok.trim().is_empty() => {
+                                                        let user_row = sqlx::query!(
+                                                            r#"
+                                                            SELECT u.id, u.type, au.role
+                                                            FROM users u
+                                                            LEFT JOIN account_users au ON au.user_id = u.id AND au.account_id = $2
+                                                            WHERE u.id = $1 AND u.pubsub_token = $3
+                                                            LIMIT 1
+                                                            "#,
+                                                            usr_id as i64,
+                                                            acc_id as i64,
+                                                            tok
+                                                        )
+                                                        .fetch_optional(&state.db)
+                                                        .await;
+
+                                                        match user_row {
+                                                            Ok(Some(row)) => {
+                                                                row.r#type.as_deref() == Some("SuperAdmin") || row.role.is_some()
+                                                            }
+                                                            _ => false,
+                                                        }
+                                                    }
+                                                    _ => false,
+                                                };
+
+                                                if !is_authorized {
+                                                    warn!(
+                                                        "Akses WebSocket ditolak: pubsub_token tidak valid atau bukan anggota akun (account={:?}, user={:?})",
+                                                        room_params.account_id, room_params.user_id
+                                                    );
+                                                    let reject = json!({
+                                                        "type": "reject_subscription",
+                                                        "identifier": client_cmd.identifier
+                                                    });
+                                                    let _ = sender.send(Message::Text(reject.to_string())).await;
+                                                    continue;
+                                                }
+
                                                 info!(
-                                                    "Client berlangganan RoomChannel: account={:?}, user={:?}",
+                                                    "Client terautentikasi dan berlangganan RoomChannel: account={:?}, user={:?}",
                                                     room_params.account_id, room_params.user_id
                                                 );
 

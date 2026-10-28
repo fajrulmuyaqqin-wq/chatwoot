@@ -134,11 +134,11 @@ pub async fn process_webhook(
             .and_then(|h| h.to_str().ok())
             .unwrap_or_default();
 
-        if !verify_meta_signature(sec, &body_bytes, sig_header) {
-            warn!("WhatsApp webhook HMAC signature mismatch for {}", phone_number);
+        if sig_header.is_empty() || !verify_meta_signature(sec, &body_bytes, sig_header) {
+            warn!("WhatsApp webhook HMAC signature mismatch or missing for {}", phone_number);
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "Invalid signature" })),
+                Json(json!({ "error": "Invalid or missing HMAC signature" })),
             );
         }
     }

@@ -68,6 +68,8 @@ pub fn create_router(state: AppState) -> Router<AppState> {
                 .patch(accounts::update_account)
                 .put(accounts::update_account),
         )
+        .route("/cache_keys", get(accounts::get_cache_keys))
+        .route("/cache_keys/", get(accounts::get_cache_keys))
         .route(
             "/inboxes",
             get(inboxes::list_inboxes).post(inboxes::create_inbox),
@@ -816,6 +818,14 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         .route("/profile/avatar", delete(profile::dummy_ok))
         .route("/profile/resend_confirmation", post(profile::dummy_ok))
         .route("/profile/reset_access_token", post(profile::dummy_ok))
+        .route(
+            "/profile/mfa",
+            get(profile::get_mfa)
+                .post(profile::post_mfa)
+                .delete(profile::dummy_ok),
+        )
+        .route("/profile/mfa/verify", post(profile::dummy_ok))
+        .route("/profile/mfa/backup_codes", post(profile::dummy_ok))
         .route("/accounts", post(accounts::create_account))
         .route(
             "/accounts/:account_id/",
@@ -824,6 +834,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
                 .put(accounts::update_account),
         )
         .nest("/accounts/:account_id", account_routes_v1)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rbac::account_access_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::audit::audit_logger,
@@ -865,6 +879,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         .nest("/accounts/:account_id", account_routes_v2)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            crate::middleware::rbac::account_access_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             crate::middleware::audit::audit_logger,
         ))
         .layer(axum::middleware::from_fn_with_state(
@@ -896,6 +914,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
     // Rute API Enterprise (Protected)
     let enterprise_api = Router::new()
         .route("/accounts/:account_id/limits", get(enterprise_limits::get_account_limits))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rbac::account_access_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::auth::require_auth,

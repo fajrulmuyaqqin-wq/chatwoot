@@ -53,14 +53,16 @@ pub async fn handle_tokopedia_webhook(
     State(state): State<AppState>,
     body_bytes: Bytes,
 ) -> impl IntoResponse {
-    // 1. Verifikasi tanda tangan HMAC jika header X-Tkpd-Signature disediakan
-    let secret = std::env::var("TOKOPEDIA_APP_SECRET").unwrap_or_else(|_| "tokopedia_secret_indonesia_2026".to_string());
-    if let Some(sig) = headers.get("X-Tkpd-Signature").and_then(|h| h.to_str().ok()) {
-        if !verify_tokopedia_signature(&secret, &body_bytes, sig) {
-            warn!("Tanda tangan webhook Tokopedia tidak valid!");
+    // 1. Verifikasi tanda tangan HMAC jika TOKOPEDIA_APP_SECRET dikonfigurasi
+    let secret = std::env::var("TOKOPEDIA_APP_SECRET").ok();
+    if let Some(sec) = secret {
+        let sig_opt = headers.get("X-Tkpd-Signature").and_then(|h| h.to_str().ok());
+        let is_valid = sig_opt.map(|sig| verify_tokopedia_signature(&sec, &body_bytes, sig)).unwrap_or(false);
+        if !is_valid {
+            warn!("Tanda tangan webhook Tokopedia tidak valid atau tidak disediakan!");
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "Invalid Tokopedia signature" })),
+                Json(json!({ "error": "Invalid or missing Tokopedia signature" })),
             );
         }
     }

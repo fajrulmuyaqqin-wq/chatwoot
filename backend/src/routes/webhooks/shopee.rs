@@ -56,16 +56,16 @@ pub async fn process_webhook(
         }
     };
 
-    // 3. Verifikasi signature jika header Authorization ada
+    // 3. Verifikasi signature (wajib jika channel partner_key terdefinisi)
     let auth_header = headers
         .get("Authorization")
         .and_then(|h| h.to_str().ok())
         .unwrap_or_default();
 
-    if !auth_header.is_empty() {
-        if !verify_shopee_signature(&channel.partner_key, &body_bytes, auth_header) {
+    if !channel.partner_key.trim().is_empty() {
+        if auth_header.is_empty() || !verify_shopee_signature(&channel.partner_key, &body_bytes, auth_header) {
             warn!("Shopee webhook signature verification failed for shop_id: {}", shop_id);
-            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid signature" })));
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid or missing signature" })));
         }
     }
 
