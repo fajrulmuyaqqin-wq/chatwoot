@@ -104,7 +104,7 @@ const menuItems = computed(() => {
       target: '_blank',
     },
     {
-      show: currentUser.value.type === 'SuperAdmin',
+      show: currentUser.value?.type === 'SuperAdmin',
       showOnCustomBrandedInstance: true,
       label: t('SIDEBAR_ITEMS.SUPER_ADMIN_CONSOLE'),
       icon: 'i-lucide-castle',
@@ -140,22 +140,30 @@ const allowedMenuItems = computed(() => {
           { 'bg-n-alpha-1': isOpen },
           isCollapsed ? 'justify-center' : 'w-full',
         ]"
-        :title="isCollapsed ? currentUser.available_name : undefined"
+        :title="
+          isCollapsed
+            ? currentUser?.available_name || currentUser?.name || ''
+            : undefined
+        "
         @click="toggle"
       >
         <Avatar
           :size="32"
-          :name="currentUser.available_name"
-          :src="currentUser.avatar_url"
-          :status="currentUserAvailability"
+          :name="currentUser?.available_name || currentUser?.name || 'User'"
+          :src="currentUser?.avatar_url || ''"
+          :status="
+            typeof currentUserAvailability === 'string'
+              ? currentUserAvailability
+              : 'online'
+          "
           class="flex-shrink-0"
         />
         <div v-if="!isCollapsed" class="min-w-0">
           <div class="text-sm font-medium leading-4 truncate text-n-slate-12">
-            {{ currentUser.available_name }}
+            {{ currentUser?.available_name || currentUser?.name || '' }}
           </div>
           <div class="text-xs truncate text-n-slate-11">
-            {{ currentUser.email }}
+            {{ currentUser?.email || '' }}
           </div>
         </div>
       </button>

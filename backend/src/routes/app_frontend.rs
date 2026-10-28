@@ -156,7 +156,7 @@ pub async fn render_vue_app(
         var interval = setInterval(function() {{
           attempts++;
           var appEl = document.getElementById('app');
-          if (appEl && appEl.children.length === 0 && typeof window.onload === 'function') {{
+          if (appEl && appEl.children.length === 0 && !appEl.__vue_app__ && typeof window.onload === 'function') {{
             clearInterval(interval);
             try {{ window.onload(); }} catch(e) {{ console.error('[chatwoot] mount error:', e); }}
             return;

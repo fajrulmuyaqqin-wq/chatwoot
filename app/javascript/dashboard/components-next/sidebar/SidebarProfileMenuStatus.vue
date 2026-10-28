@@ -46,7 +46,10 @@ const availabilityStatuses = computed(() => {
 });
 
 const activeStatus = computed(() => {
-  return availabilityStatuses.value.find(status => status.active);
+  return (
+    availabilityStatuses.value.find(status => status.active) ||
+    availabilityStatuses.value[0]
+  );
 });
 
 const autoOfflineToggle = computed({

@@ -61,6 +61,20 @@ initializeChatwootEvents();
 initializeAnalyticsEvents();
 initalizeRouter();
 
-window.onload = () => {
-  app.mount('#app');
+let isMounted = false;
+const mountApp = () => {
+  if (isMounted) return;
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    isMounted = true;
+    app.mount(appEl);
+  }
 };
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', mountApp);
+} else {
+  mountApp();
+}
+
+window.onload = mountApp;

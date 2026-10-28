@@ -66,22 +66,45 @@ pub async fn create_and_dispatch_notification(
     .unwrap_or(0);
 
     // Ambil ringkasan primary_actor (Conversation)
-    let conv_summary = sqlx::query_as::<_, (i32, i32, i32, Option<String>)>(
-        "SELECT id, display_id, inbox_id, additional_attributes::text FROM conversations WHERE id = $1",
+    let conv_summary = sqlx::query_as::<_, (i32, i32, i32, Option<i32>)>(
+        "SELECT id, display_id, inbox_id, contact_id FROM conversations WHERE id = $1",
     )
     .bind(primary_actor_id as i32)
     .fetch_optional(&state.db)
     .await
     .unwrap_or(None);
 
-    let primary_actor_json = conv_summary.map(|(cid, did, iid, _)| {
-        json!({
-            "id": cid,
+    let primary_actor_json = if let Some((_cid, did, iid, maybe_contact_id)) = conv_summary {
+        let mut sender_name = "User".to_string();
+        if let Some(contact_id) = maybe_contact_id {
+            if let Ok(Some((Some(cname),))) = sqlx::query_as::<_, (Option<String>,)>(
+                "SELECT name FROM contacts WHERE id = $1",
+            )
+            .bind(contact_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                if !cname.trim().is_empty() {
+                    sender_name = cname;
+                }
+            }
+        }
+
+        Some(json!({
+            "id": did,
             "display_id": did,
             "inbox_id": iid,
-            "account_id": account_id
-        })
-    });
+            "account_id": account_id,
+            "meta": {
+                "sender": {
+                    "name": sender_name,
+                    "thumbnail": ""
+                }
+            }
+        }))
+    } else {
+        None
+    };
 
     let type_str = notification_type_to_str(notif.notification_type).to_string();
 

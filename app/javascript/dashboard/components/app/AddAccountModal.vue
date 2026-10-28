@@ -47,11 +47,9 @@ export default {
         const account_id = await this.$store.dispatch('accounts/create', {
           account_name: this.accountName,
         });
-        this.$emit('closeAccountCreateModal');
-        useAlert(this.$t('CREATE_ACCOUNT.API.SUCCESS_MESSAGE'));
-        window.location = `/app/accounts/${account_id}/dashboard`;
+        window.location.href = `/app/accounts/${account_id}/dashboard`;
       } catch (error) {
-        if (error.response.status === 422) {
+        if (error?.response?.status === 422) {
           useAlert(this.$t('CREATE_ACCOUNT.API.EXIST_MESSAGE'));
         } else {
           useAlert(this.$t('CREATE_ACCOUNT.API.ERROR_MESSAGE'));

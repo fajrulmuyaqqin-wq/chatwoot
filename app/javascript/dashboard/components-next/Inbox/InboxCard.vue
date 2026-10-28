@@ -47,13 +47,15 @@ const getMessageClasses = {
 
 const primaryActor = computed(() => props.inboxItem?.primaryActor);
 const meta = computed(() => primaryActor.value?.meta);
-const assigneeMeta = computed(() => meta.value?.sender);
+const assigneeMeta = computed(() => meta.value?.sender || {});
 const isUnread = computed(() => !props.inboxItem?.readAt);
-const inbox = computed(() => props.stateInbox);
+const inbox = computed(() => props.stateInbox || {});
 
 const inboxIcon = computed(() => {
-  const { channelType, medium, voiceEnabled } = inbox.value;
-  return getInboxIconByType(channelType, medium, 'fill', voiceEnabled);
+  const { channelType, medium, voiceEnabled } = inbox.value || {};
+  return channelType
+    ? getInboxIconByType(channelType, medium, 'fill', voiceEnabled)
+    : '';
 });
 
 const hasSlaThreshold = computed(() => {
@@ -163,8 +165,8 @@ onBeforeMount(contextMenuActions.close);
   >
     <div class="flex items-start gap-2">
       <Avatar
-        :name="assigneeMeta.name"
-        :src="assigneeMeta.thumbnail"
+        :name="assigneeMeta.name || ''"
+        :src="assigneeMeta.thumbnail || ''"
         :size="20"
         rounded-full
         class="mt-1"

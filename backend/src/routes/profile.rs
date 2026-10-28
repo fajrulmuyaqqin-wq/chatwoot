@@ -16,7 +16,7 @@ use crate::state::AppState;
 pub struct ProfilePayload {
     pub profile: Option<ProfileInnerPayload>,
     pub account_id: Option<i64>,
-    pub availability: Option<i32>,
+    pub availability: Option<serde_json::Value>,
     pub auto_offline: Option<bool>,
     pub ui_settings: Option<serde_json::Value>,
     pub display_name: Option<String>,
@@ -25,7 +25,7 @@ pub struct ProfilePayload {
 #[derive(Debug, Deserialize, Default)]
 pub struct ProfileInnerPayload {
     pub account_id: Option<i64>,
-    pub availability: Option<i32>,
+    pub availability: Option<serde_json::Value>,
     pub auto_offline: Option<bool>,
     pub ui_settings: Option<serde_json::Value>,
     pub display_name: Option<String>,
@@ -39,10 +39,24 @@ impl ProfilePayload {
             .or(self.account_id)
     }
     pub fn get_availability(&self) -> Option<i32> {
-        self.profile
+        let raw = self
+            .profile
             .as_ref()
-            .and_then(|p| p.availability)
-            .or(self.availability)
+            .and_then(|p| p.availability.as_ref())
+            .or(self.availability.as_ref());
+        raw.and_then(|v| {
+            if let Some(i) = v.as_i64() {
+                Some(i as i32)
+            } else if let Some(s) = v.as_str() {
+                match s.to_lowercase().as_str() {
+                    "offline" => Some(1),
+                    "busy" => Some(2),
+                    _ => Some(0),
+                }
+            } else {
+                None
+            }
+        })
     }
     pub fn get_auto_offline(&self) -> Option<bool> {
         self.profile
@@ -96,16 +110,25 @@ pub async fn get_profile(
         .map(|a| a.role.clone())
         .unwrap_or_else(|| "agent".to_string());
 
+    let available_name = user
+        .display_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| user.name.clone());
+
     let auth_user = AuthResponseUser {
         id: user.id,
         email: user.email.unwrap_or_else(|| current_user.email.clone()),
         name: user.name,
         display_name: user.display_name,
+        available_name,
+        avatar_url: None,
         provider: user.provider,
         uid: user.uid,
         pubsub_token: user.pubsub_token,
         account_id: primary_account_id,
         role: primary_role,
+        r#type: user.r#type,
         ui_settings: user.ui_settings.unwrap_or_else(|| json!({})),
         accounts: accounts_data,
     };
@@ -199,4 +222,27 @@ pub async fn update_auto_offline(
 
 pub async fn dummy_ok() -> impl IntoResponse {
     (StatusCode::OK, Json(json!({ "success": true })))
+}
+
+pub async fn get_mfa() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "feature_available": true,
+            "enabled": false,
+            "enforced": false,
+            "backup_codes_generated": false,
+            "remaining_backup_codes": 0
+        })),
+    )
+}
+
+pub async fn post_mfa() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "secret": "JBSWY3DPEHPK3PXP",
+            "provisioning_uri": "otpauth://totp/Chatwoot?secret=JBSWY3DPEHPK3PXP"
+        })),
+    )
 }

@@ -170,16 +170,25 @@ pub async fn sign_in(
         .map(|a| a.role.clone())
         .unwrap_or_else(|| "agent".to_string());
 
+    let available_name = user
+        .display_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| user.name.clone());
+
     let auth_user = AuthResponseUser {
         id: user.id,
         email: user.email.unwrap_or_else(|| email.clone()),
         name: user.name,
         display_name: user.display_name,
+        available_name,
+        avatar_url: None,
         provider: user.provider,
         uid: user.uid,
         pubsub_token: user.pubsub_token,
         account_id: primary_account_id,
         role: primary_role,
+        r#type: user.r#type,
         ui_settings: user.ui_settings.unwrap_or_else(|| json!({})),
         accounts: accounts_data,
     };
@@ -293,16 +302,25 @@ pub async fn validate_token(
         .map(|a| a.role.clone())
         .unwrap_or_else(|| "agent".to_string());
 
+    let available_name = user
+        .display_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| user.name.clone());
+
     let auth_user = AuthResponseUser {
         id: user.id,
         email: user.email.unwrap_or_else(|| uid_str.clone()),
         name: user.name,
         display_name: user.display_name,
+        available_name,
+        avatar_url: None,
         provider: user.provider,
         uid: user.uid,
         pubsub_token: user.pubsub_token,
         account_id: primary_account_id,
         role: primary_role,
+        r#type: user.r#type,
         ui_settings: user.ui_settings.unwrap_or_else(|| json!({})),
         accounts: accounts_data,
     };
@@ -410,6 +428,11 @@ async fn fetch_user_accounts(db: &sqlx::PgPool, user_id: i64) -> Vec<AuthRespons
                 Some(1) => vec!["administrator".to_string()],
                 _ => vec!["agent".to_string()],
             };
+            let availability_str = match r.availability {
+                1 => "offline",
+                2 => "busy",
+                _ => "online",
+            };
             AuthResponseAccount {
                 id: r.account_id,
                 name: r.name,
@@ -417,8 +440,8 @@ async fn fetch_user_accounts(db: &sqlx::PgPool, user_id: i64) -> Vec<AuthRespons
                 role: role_str.to_string(),
                 permissions,
                 active_at: r.active_at,
-                availability: r.availability,
-                availability_status: "online".to_string(),
+                availability: availability_str.to_string(),
+                availability_status: availability_str.to_string(),
                 auto_offline: r.auto_offline,
             }
         })

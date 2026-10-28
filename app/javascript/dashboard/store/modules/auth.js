@@ -41,7 +41,13 @@ export const getters = {
     const [currentAccount = {}] = accounts.filter(
       account => account.id === $getters.getCurrentAccountId
     );
-    return currentAccount.availability;
+    const availability =
+      currentAccount.availability ?? currentAccount.availability_status;
+    if (typeof availability === 'number') {
+      const statusMap = { 0: 'online', 1: 'offline', 2: 'busy' };
+      return statusMap[availability] || 'online';
+    }
+    return availability || 'online';
   },
 
   getCurrentUserAutoOffline($state, $getters) {

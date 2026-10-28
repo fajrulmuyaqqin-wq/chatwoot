@@ -79,7 +79,7 @@ pub struct AuthResponseAccount {
     pub role: String,
     pub permissions: Vec<String>,
     pub active_at: Option<NaiveDateTime>,
-    pub availability: i32,
+    pub availability: String,
     pub availability_status: String,
     pub auto_offline: bool,
 }
@@ -91,11 +91,14 @@ pub struct AuthResponseUser {
     pub email: String,
     pub name: String,
     pub display_name: Option<String>,
+    pub available_name: String,
+    pub avatar_url: Option<String>,
     pub provider: String,
     pub uid: String,
     pub pubsub_token: Option<String>,
     pub account_id: Option<i64>,
     pub role: String,
+    pub r#type: Option<String>,
     pub ui_settings: serde_json::Value,
     pub accounts: Vec<AuthResponseAccount>,
 }
@@ -118,11 +121,14 @@ mod tests {
                 email: "admin@example.com".to_string(),
                 name: "Administrator".to_string(),
                 display_name: Some("Admin".to_string()),
+                available_name: "Admin".to_string(),
+                avatar_url: None,
                 provider: "email".to_string(),
                 uid: "admin@example.com".to_string(),
                 pubsub_token: Some("sample_pubsub_token_123".to_string()),
                 account_id: Some(1),
                 role: "administrator".to_string(),
+                r#type: Some("SuperAdmin".to_string()),
                 ui_settings: serde_json::json!({ "theme": "dark" }),
                 accounts: vec![AuthResponseAccount {
                     id: 1,
@@ -131,7 +137,7 @@ mod tests {
                     role: "administrator".to_string(),
                     permissions: vec!["administrator".to_string()],
                     active_at: None,
-                    availability: 0,
+                    availability: "online".to_string(),
                     availability_status: "online".to_string(),
                     auto_offline: true,
                 }],
@@ -141,6 +147,7 @@ mod tests {
         let json = serde_json::to_string(&response).expect("Harus dapat diserialisasi ke JSON");
         assert!(json.contains("\"pubsub_token\":\"sample_pubsub_token_123\""));
         assert!(json.contains("\"role\":\"administrator\""));
+        assert!(json.contains("\"available_name\":\"Admin\""));
         assert!(json.contains("\"accounts\":["));
     }
 }

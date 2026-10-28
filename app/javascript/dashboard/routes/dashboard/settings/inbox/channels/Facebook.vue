@@ -83,6 +83,11 @@ export default {
     isFacebookConnectionDisabled() {
       return this.isMetaInboxCreationDisabled;
     },
+    isHttpProtocol() {
+      return (
+        typeof window !== 'undefined' && window.location.protocol === 'http:'
+      );
+    },
   },
 
   mounted() {
@@ -104,12 +109,19 @@ export default {
           // Cancelled popup / not authorized — surface a generic auth error.
           this.hasError = true;
           this.errorStateMessage = this.$t('INBOX_MGMT.DETAILS.ERROR_FB_AUTH');
-          this.errorStateDescription = '';
+          this.errorStateDescription = this.isHttpProtocol
+            ? this.$t('INBOX_MGMT.ADD.FB.ERROR_HTTP_DESC')
+            : this.$t('INBOX_MGMT.ADD.FB.ERROR_CONFIG_DESC');
           return;
         }
         this.pageList = result.pages;
         this.user_access_token = result.userAccessToken;
       } catch (error) {
+        this.hasError = true;
+        this.errorStateMessage = this.$t('INBOX_MGMT.DETAILS.ERROR_FB_AUTH');
+        this.errorStateDescription = this.isHttpProtocol
+          ? this.$t('INBOX_MGMT.ADD.FB.ERROR_HTTP_DESC')
+          : '';
         if (error.name === 'ScriptLoaderError') {
           useAlert(this.$t('INBOX_MGMT.DETAILS.ERROR_FB_LOADING'));
         } else {
@@ -117,6 +129,13 @@ export default {
           useAlert(this.$t('INBOX_MGMT.DETAILS.ERROR_FB_AUTH'));
         }
       }
+    },
+
+    resetLogin() {
+      this.hasLoginStarted = false;
+      this.hasError = false;
+      this.errorStateMessage = '';
+      this.errorStateDescription = '';
     },
 
     setPageName(pageId) {
@@ -193,6 +212,26 @@ export default {
           {{ replaceInstallationName($t('INBOX_MGMT.ADD.FB.HELP')) }}
         </p>
         <Banner
+          v-if="isHttpProtocol"
+          color="amber"
+          class="w-full mb-6 text-start"
+        >
+          <div class="flex items-start gap-3">
+            <Icon
+              icon="i-lucide-triangle-alert"
+              class="flex-shrink-0 size-4 mt-0.5 text-n-amber-11"
+            />
+            <div class="text-xs space-y-1">
+              <p class="font-medium text-n-amber-12">
+                {{ $t('INBOX_MGMT.ADD.FB.HTTPS_REQUIRED_TITLE') }}
+              </p>
+              <p>
+                {{ $t('INBOX_MGMT.ADD.FB.HTTPS_REQUIRED_DESC') }}
+              </p>
+            </div>
+          </div>
+        </Banner>
+        <Banner
           v-if="isFacebookConnectionDisabled"
           color="amber"
           class="w-full"
@@ -215,15 +254,67 @@ export default {
             </span>
           </div>
         </Banner>
+        <div
+          class="w-full mt-4 p-4 text-start bg-n-slate-2 border border-n-slate-4 rounded-xl"
+        >
+          <h4
+            class="text-sm font-semibold text-n-slate-12 mb-3 flex items-center gap-2"
+          >
+            <Icon icon="i-lucide-info" class="size-4 text-n-brand" />
+            {{ $t('INBOX_MGMT.ADD.FB.REQUIREMENTS_TITLE') }}
+          </h4>
+          <ul class="text-xs text-n-slate-11 space-y-2.5 list-disc list-inside">
+            <li>
+              <span class="font-medium text-n-slate-12">
+                {{ $t('INBOX_MGMT.ADD.FB.REQ_META_APP_TITLE') }}
+              </span>
+              <span>
+                {{ $t('INBOX_MGMT.ADD.FB.REQ_META_APP_DESC') }}
+              </span>
+              <a
+                href="https://developers.facebook.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link underline text-n-brand ml-1"
+              >
+                {{ $t('INBOX_MGMT.ADD.FB.META_DEVELOPERS_LINK') }}
+              </a>
+            </li>
+            <li>
+              <span class="font-medium text-n-slate-12">
+                {{ $t('INBOX_MGMT.ADD.FB.REQ_PRODUCTS_TITLE') }}
+              </span>
+              <span>{{ $t('INBOX_MGMT.ADD.FB.REQ_PRODUCTS_DESC') }}</span>
+            </li>
+            <li>
+              <span class="font-medium text-n-slate-12">
+                {{ $t('INBOX_MGMT.ADD.FB.REQ_HTTPS_TITLE') }}
+              </span>
+              <span>{{ $t('INBOX_MGMT.ADD.FB.REQ_HTTPS_DESC') }}</span>
+            </li>
+            <li>
+              <span class="font-medium text-n-slate-12">
+                {{ $t('INBOX_MGMT.ADD.FB.REQ_ENV_TITLE') }}
+              </span>
+              <span>{{ $t('INBOX_MGMT.ADD.FB.REQ_ENV_DESC') }}</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
     <div v-else>
-      <div v-if="hasError" class="max-w-lg mx-auto text-center">
+      <div v-if="hasError" class="max-w-lg mx-auto text-center space-y-4">
         <h5>{{ errorStateMessage }}</h5>
         <p
           v-if="errorStateDescription"
           v-dompurify-html="errorStateDescription"
         />
+        <div class="pt-2">
+          <NextButton
+            :label="$t('INBOX_MGMT.ADD.FB.TRY_AGAIN')"
+            @click="resetLogin()"
+          />
+        </div>
       </div>
       <LoadingState v-else-if="showLoader" :message="emptyStateMessage" />
       <form

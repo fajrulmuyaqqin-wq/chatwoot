@@ -138,14 +138,71 @@ pub async fn create_account(
     .execute(&state.db)
     .await;
 
+    // Ambil daftar akun pengguna terkini
+    let user_accounts = sqlx::query_as::<_, (i32, String, Option<i32>, i32)>(
+        r#"
+        SELECT a.id, a.name, a.locale, au.role
+        FROM account_users au
+        JOIN accounts a ON a.id = au.account_id
+        WHERE au.user_id = $1
+        ORDER BY a.id ASC
+        "#,
+    )
+    .bind(current_user.id as i64)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let accounts_json: Vec<_> = user_accounts
+        .into_iter()
+        .map(|(aid, aname, alocale, arole)| {
+            json!({
+                "id": aid,
+                "name": aname,
+                "role": if arole == 1 { "administrator" } else { "agent" },
+                "locale": locale_int_to_code(alocale),
+                "availability": "online",
+                "availability_status": "online"
+            })
+        })
+        .collect();
+
+    let user_row = sqlx::query!(
+        "SELECT name, display_name FROM users WHERE id = $1",
+        current_user.id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let user_name = user_row.as_ref().map(|u| u.name.clone()).unwrap_or_else(|| current_user.email.clone());
+    let display_name = user_row.as_ref().and_then(|u| u.display_name.clone());
+    let available_name = display_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| user_name.clone());
+
     (
         StatusCode::OK,
         Json(json!({
+            "data": {
+                "id": current_user.id,
+                "email": current_user.email,
+                "name": user_name,
+                "display_name": display_name,
+                "available_name": available_name,
+                "avatar_url": serde_json::Value::Null,
+                "account_id": account.id,
+                "role": "administrator",
+                "accounts": accounts_json
+            },
             "id": account.id,
+            "account_id": account.id,
             "name": account.name,
             "role": "administrator",
             "status": "active",
-            "locale": account.locale,
+            "locale": locale_int_to_code(account.locale),
             "domain": account.domain,
             "support_email": account.support_email
         })),
