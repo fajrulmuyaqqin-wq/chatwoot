@@ -564,3 +564,81 @@ pub async fn get_campaign_contacts(
         })),
     ).into_response()
 }
+
+/// GET /api/v1/accounts/:account_id/conversations/:display_id/campaign_history
+pub async fn get_conversation_campaign_history(
+    Path((account_id, display_id)): Path<(i32, i32)>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let conv = match sqlx::query_as::<_, crate::models::conversation::Conversation>(
+        "SELECT * FROM conversations WHERE account_id = $1 AND display_id = $2",
+    )
+    .bind(account_id)
+    .bind(display_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(c)) => c,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Conversation not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT cr.id, cr.source_id, cr.status, cr.message_content,
+               cr.sent_at, cr.delivered_at, cr.read_at, cr.failed_at,
+               c.display_id AS campaign_display_id, c.title AS campaign_title
+        FROM campaign_recipients cr
+        JOIN campaigns c ON c.id = cr.campaign_id
+        WHERE cr.account_id = $1 AND cr.contact_id = $2 AND cr.inbox_id = $3
+          AND cr.sent_at IS NOT NULL
+        ORDER BY cr.sent_at DESC, cr.id DESC
+        LIMIT 25
+        "#,
+        account_id as i64,
+        conv.contact_id.unwrap_or(0) as i64,
+        conv.inbox_id as i64
+    )
+
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let payload: Vec<_> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "campaign": {
+                    "id": r.campaign_display_id,
+                    "title": r.campaign_title
+                },
+                "message_content": r.message_content,
+                "source_id": r.source_id,
+                "status": r.status,
+                "sent_at": r.sent_at.map(|t| t.and_utc().timestamp()),
+                "delivered_at": r.delivered_at.map(|t| t.and_utc().timestamp()),
+                "read_at": r.read_at.map(|t| t.and_utc().timestamp()),
+                "failed_at": r.failed_at.map(|t| t.and_utc().timestamp())
+            })
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "payload": payload,
+            "meta": {
+                "next_before": null,
+                "first_message_id": 1
+            }
+        })),
+    )
+        .into_response()
+}
+

@@ -10,6 +10,7 @@ pub mod bulk_actions;
 pub mod campaigns;
 pub mod canned_responses;
 pub mod captain;
+pub mod captain_tasks;
 pub mod calls;
 pub mod callbacks;
 pub mod companies;
@@ -34,7 +35,9 @@ pub mod monitors;
 pub mod notifications;
 pub mod portals;
 pub mod profile;
+pub mod reporting_events;
 pub mod reports;
+
 pub mod saml_settings;
 pub mod search;
 pub mod sla;
@@ -224,6 +227,18 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             get(messages::list_messages).post(messages::create_message),
         )
         .route(
+            "/conversations/:display_id/messages/auto_translate",
+            post(messages::auto_translate_messages),
+        )
+        .route(
+            "/conversations/:display_id/messages/:id/translate",
+            post(messages::translate_single_message),
+        )
+        .route(
+            "/conversations/:display_id/campaign_history",
+            get(campaigns::get_conversation_campaign_history),
+        )
+        .route(
             "/conversations/:display_id/direct_uploads",
             post(uploads::direct_upload),
         )
@@ -233,10 +248,31 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             get(sla::list_sla_policies).post(sla::create_sla_policy),
         )
         .route(
+            "/applied_slas",
+            get(sla::list_applied_slas),
+        )
+        .route(
+            "/applied_slas/metrics",
+            get(sla::get_applied_sla_metrics),
+        )
+        .route(
+            "/applied_slas/download",
+            get(sla::download_applied_slas_csv),
+        )
+        .route(
             "/conversations/:display_id/apply_sla",
             post(sla::apply_sla_to_conversation),
         )
+        .route(
+            "/reporting_events",
+            get(reporting_events::list_reporting_events),
+        )
+        .route(
+            "/conversations/:display_id/reporting_events",
+            get(reporting_events::list_conversation_reporting_events),
+        )
         .route("/articles", get(ai::list_articles).post(ai::create_article))
+
         .route("/ai/reply_suggestions", post(ai::get_reply_suggestion))
         // Omnisearch
         .route("/search", get(search::search_all))
@@ -431,6 +467,11 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             "/csat_survey_responses/download",
             get(csat::download_csat_csv),
         )
+        .route(
+            "/csat_survey_responses/:id",
+            patch(csat::update_csat_response),
+        )
+
         // Custom Filters (Folders)
         .route(
             "/custom_filters",
@@ -671,6 +712,38 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             "/captain/copilot_threads/:thread_id/copilot_messages",
             get(copilot::list_messages).post(copilot::create_message),
         )
+        // Captain Tasks
+        .route(
+            "/captain/tasks/rewrite",
+            post(captain_tasks::rewrite_content),
+        )
+        .route(
+            "/captain/tasks/summarize",
+            post(captain_tasks::summarize_conversation),
+        )
+        .route(
+            "/captain/tasks/reply_suggestion",
+            post(captain_tasks::reply_suggestion),
+        )
+        .route(
+            "/captain/tasks/follow_up",
+            post(captain_tasks::follow_up),
+        )
+        // Captain Agent Sessions
+        .route(
+            "/captain/agent_sessions/:id",
+            get(captain_tasks::get_agent_session_citation),
+        )
+        // Captain Copilot Runs Decisions
+        .route(
+            "/captain/copilot_runs/:id/approve",
+            post(captain_tasks::approve_copilot_run),
+        )
+        .route(
+            "/captain/copilot_runs/:id/reject",
+            post(captain_tasks::reject_copilot_run),
+        )
+
         // Enterprise Custom Roles (RBAC)
         .route(
             "/custom_roles",
