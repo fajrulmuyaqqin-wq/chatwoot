@@ -706,3 +706,178 @@ pub async fn create_message(
     (StatusCode::OK, Json(resp_json))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AutoTranslatePayload {
+    pub message_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TranslateMessagePayload {
+    pub target_language: Option<String>,
+}
+
+/// POST /api/v1/accounts/:account_id/conversations/:display_id/messages/auto_translate
+pub async fn auto_translate_messages(
+    Path((account_id, display_id)): Path<(i32, i32)>,
+    State(state): State<AppState>,
+    Json(payload): Json<AutoTranslatePayload>,
+) -> impl IntoResponse {
+    let conv = match sqlx::query_as::<_, Conversation>(
+        "SELECT * FROM conversations WHERE account_id = $1 AND display_id = $2",
+    )
+    .bind(account_id)
+    .bind(display_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(c)) => c,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let db_clone = state.db.clone();
+    let state_clone = state.clone();
+    let message_ids = payload.message_ids;
+    let conv_id = conv.id;
+
+    tokio::spawn(async move {
+        let llm_provider = crate::services::llm::get_llm_provider(None, None, None, &state_clone.config);
+        for mid in message_ids {
+            let msg = match sqlx::query_as::<_, Message>(
+                "SELECT * FROM messages WHERE id = $1 AND conversation_id = $2",
+            )
+            .bind(mid)
+            .bind(conv_id)
+            .fetch_optional(&db_clone)
+            .await
+            {
+                Ok(Some(m)) => m,
+                _ => continue,
+            };
+
+            let content = match msg.content {
+                Some(ref c) if !c.trim().is_empty() => c.clone(),
+                _ => continue,
+            };
+
+            let prompt = format!(
+                "Terjemahkan pesan dukungan pelanggan berikut ke dalam Bahasa Indonesia yang alami, akurat, dan sopan. Hanya berikan hasil terjemahan:\n\n{}",
+                content
+            );
+            let chat_msgs = vec![
+                crate::services::llm::ChatMessage::system("Anda adalah penerjemah pesan customer support yang handal.".to_string()),
+                crate::services::llm::ChatMessage::user(prompt),
+            ];
+            let opts = crate::services::llm::LlmOptions {
+                model: Some("gpt-4o-mini".to_string()),
+                temperature: Some(0.2),
+                max_tokens: Some(512),
+            };
+
+            if let Ok(translated) = llm_provider.chat_completion(&chat_msgs, &opts).await {
+                let mut attrs = msg.content_attributes.unwrap_or_else(|| json!({}));
+                if !attrs.is_object() {
+                    attrs = json!({});
+                }
+                if let Some(obj) = attrs.as_object_mut() {
+                    let mut translations = obj.get("translations").cloned().unwrap_or_else(|| json!({}));
+                    if let Some(t_obj) = translations.as_object_mut() {
+                        t_obj.insert("id".to_string(), json!(translated.trim()));
+                    } else {
+                        translations = json!({ "id": translated.trim() });
+                    }
+                    obj.insert("translations".to_string(), translations);
+                }
+
+                let _ = sqlx::query(
+                    "UPDATE messages SET content_attributes = $1, updated_at = NOW() WHERE id = $2",
+                )
+                .bind(&attrs)
+                .bind(mid)
+                .execute(&db_clone)
+                .await;
+
+                let updated_msg = json!({
+                    "id": mid,
+                    "content": msg.content,
+                    "content_attributes": attrs,
+                    "conversation_id": conv_id
+                });
+                event_dispatcher::dispatch_event(&state_clone, account_id as crate::state::AccountId, "message.updated", updated_msg);
+            }
+        }
+    });
+
+    StatusCode::ACCEPTED.into_response()
+}
+
+/// POST /api/v1/accounts/:account_id/conversations/:display_id/messages/:id/translate
+pub async fn translate_single_message(
+    Path((account_id, display_id, message_id)): Path<(i32, i32, i64)>,
+    State(state): State<AppState>,
+    Json(payload): Json<TranslateMessagePayload>,
+) -> impl IntoResponse {
+    let conv = match sqlx::query_as::<_, Conversation>(
+        "SELECT * FROM conversations WHERE account_id = $1 AND display_id = $2",
+    )
+    .bind(account_id)
+    .bind(display_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(c)) => c,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Conversation not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let msg = match sqlx::query_as::<_, Message>(
+        "SELECT * FROM messages WHERE id = $1 AND conversation_id = $2",
+    )
+    .bind(message_id)
+    .bind(conv.id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(m)) => m,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Message not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let content = msg.content.unwrap_or_default();
+    let target_lang = payload.target_language.unwrap_or_else(|| "id".to_string());
+
+    let prompt = format!(
+        "Terjemahkan pesan berikut ke dalam kode bahasa '{}'. Hanya berikan teks hasil terjemahan:\n\n{}",
+        target_lang, content
+    );
+    let chat_msgs = vec![
+        crate::services::llm::ChatMessage::system("Anda adalah penerjemah pesan customer support yang handal.".to_string()),
+        crate::services::llm::ChatMessage::user(prompt),
+    ];
+    let opts = crate::services::llm::LlmOptions {
+        model: Some("gpt-4o-mini".to_string()),
+        temperature: Some(0.2),
+        max_tokens: Some(512),
+    };
+
+    let translated = match crate::services::llm::get_llm_provider(None, None, None, &state.config).chat_completion(&chat_msgs, &opts).await {
+        Ok(t) => t.trim().to_string(),
+        Err(e) => {
+            warn!("Translation failed: {}", e);
+            content
+        }
+    };
+
+    (StatusCode::OK, Json(json!({ "content": translated }))).into_response()
+}
+
+

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::{header, StatusCode},
     response::IntoResponse,
     Json,
@@ -7,6 +7,9 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::warn;
+
+use crate::middleware::auth::CurrentUser;
+
 
 use crate::models::contact::Contact;
 use crate::models::conversation::Conversation;
@@ -316,3 +319,72 @@ pub async fn download_csat_csv(
         csv_out,
     )
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateCsatPayload {
+    pub csat_review_notes: Option<String>,
+}
+
+/// PATCH /api/v1/accounts/:account_id/csat_survey_responses/:id
+pub async fn update_csat_response(
+    Path((account_id, id)): Path<(i64, i64)>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateCsatPayload>,
+) -> impl IntoResponse {
+    let updated = match sqlx::query_as::<_, CsatSurveyResponse>(
+        r#"
+        UPDATE csat_survey_responses
+        SET csat_review_notes = $1,
+            review_notes_updated_by_id = $2,
+            review_notes_updated_at = NOW()
+        WHERE account_id = $3 AND id = $4
+        RETURNING *
+        "#,
+    )
+    .bind(&payload.csat_review_notes)
+    .bind(current_user.id as i64)
+    .bind(account_id)
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(r)) => r,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "CSAT survey response not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let conv_display_id: i32 = sqlx::query_scalar!(
+        "SELECT display_id FROM conversations WHERE id = $1",
+        updated.conversation_id as i32
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let resp = CsatSurveyResponseData {
+        id: updated.id,
+        rating: updated.rating,
+        feedback_message: updated.feedback_message,
+        csat_review_notes: updated.csat_review_notes,
+        review_notes_updated_at: updated.review_notes_updated_at.map(|t| t.and_utc().timestamp()),
+        review_notes_updated_by: Some(json!({
+            "id": current_user.id,
+            "name": current_user.email.split('@').next().unwrap_or("User")
+        })),
+        account_id: updated.account_id,
+        message_id: updated.message_id,
+        contact: Some(json!({ "id": updated.contact_id })),
+        conversation_id: conv_display_id,
+        assigned_agent: updated.assigned_agent_id.map(|aid| json!({ "id": aid })),
+        created_at: updated.created_at.and_utc().timestamp(),
+    };
+
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
