@@ -15,14 +15,85 @@ const store = useStore();
 const { accountId, currentAccount } = useAccount();
 const currentUser = useMapGetter('getCurrentUser');
 
-const isLoading = ref(true);
+const DEFAULT_TIERS = [
+  {
+    id: 'free',
+    name: 'Free',
+    badge: 'Free',
+    description:
+      'Untuk pemula & startup yang membutuhkan live chat dan email dasar.',
+    price_monthly: 0,
+    agent_limit: 2,
+    inbox_limit: 2,
+    highlight_features: [
+      '2 Agen & 2 Inbox',
+      'Live Chat Widget & Email',
+      'Canned Responses & Labels',
+      'Laporan Dasar',
+    ],
+  },
+  {
+    id: 'small',
+    name: 'Small',
+    badge: 'Popular',
+    description:
+      'Untuk tim kecil dengan WhatsApp Cloud API & Omnichannel terintegrasi.',
+    price_monthly: 299000,
+    agent_limit: 5,
+    inbox_limit: 5,
+    highlight_features: [
+      '5 Agen & 5 Inbox',
+      'WhatsApp Cloud API Resmi',
+      'Instagram Direct & Telegram',
+      'Macro & Basic Automations',
+    ],
+  },
+  {
+    id: 'max',
+    name: 'Max',
+    badge: 'Advanced',
+    description:
+      'Untuk bisnis bertumbuh dengan volume chat tinggi, SLA & AI assist.',
+    price_monthly: 799000,
+    agent_limit: 15,
+    inbox_limit: 20,
+    highlight_features: [
+      '15 Agen & 20 Inbox',
+      'Semua Channel + Shopee',
+      'SLA Management & CSAT',
+      'Conversation Monitors & Auto Assignment',
+      'Captain AI Bot Integration',
+    ],
+  },
+  {
+    id: 'enterprise',
+    name: 'Enterprise (Chat Admin)',
+    badge: 'Chat Admin',
+    description:
+      'Skala korporasi dengan Chat Admin, Custom Roles, Audit Logs & Unlimited.',
+    price_monthly: 1999000,
+    agent_limit: -1,
+    inbox_limit: -1,
+    highlight_features: [
+      'Unlimited Agen & Inbox',
+      'Dedicated Chat Admin Governance',
+      'Custom Roles & Granular Permissions',
+      'Audit Logs & Security Compliance',
+      'Captain AI Full Suite & Custom Tools',
+      'SAML SSO & Prioritas Webhook Routing',
+    ],
+  },
+];
+
+const isLoading = ref(false);
 const isSubmitting = ref(false);
 const activeTierId = ref('free');
 const isRegistered = ref(false);
-const availableTiers = ref([]);
+const availableTiers = ref(DEFAULT_TIERS);
 
 const formatCurrency = price => {
   if (price === 0) return 'Rp 0';
+  if (typeof price !== 'number') return 'Rp 0';
   return `Rp ${price.toLocaleString('id-ID')}`;
 };
 
@@ -30,92 +101,25 @@ const activeTier = computed(() => {
   return (
     currentAccount.value?.custom_attributes?.plan_name ||
     currentAccount.value?.custom_attributes?.tier ||
-    activeTierId.value
+    activeTierId.value ||
+    'free'
   );
 });
 
 const fetchTiersData = async () => {
-  isLoading.value = true;
   try {
-    const data = await store.dispatch('accounts/getTier', accountId.value);
+    const id = accountId.value;
+    if (!id) return;
+    const data = await store.dispatch('accounts/getTier', id);
     if (data) {
-      availableTiers.value = data.available_tiers || [];
+      if (data.available_tiers && data.available_tiers.length) {
+        availableTiers.value = data.available_tiers;
+      }
       activeTierId.value = data.current_tier || 'free';
       isRegistered.value = Boolean(data.is_registered);
     }
   } catch (_) {
-    // Fallback catalog if backend offline
-    availableTiers.value = [
-      {
-        id: 'free',
-        name: 'Free',
-        badge: t('BILLING_SETTINGS.TIER_SELECTION.FREE_BADGE'),
-        description:
-          'Untuk pemula & startup yang membutuhkan live chat dan email dasar.',
-        price_monthly: 0,
-        agent_limit: 2,
-        inbox_limit: 2,
-        highlight_features: [
-          '2 Agen & 2 Inbox',
-          'Live Chat Widget & Email',
-          'Canned Responses & Labels',
-          'Laporan Dasar',
-        ],
-      },
-      {
-        id: 'small',
-        name: 'Small',
-        badge: t('BILLING_SETTINGS.TIER_SELECTION.POPULAR_BADGE'),
-        description:
-          'Untuk tim kecil dengan WhatsApp Cloud API & Omnichannel terintegrasi.',
-        price_monthly: 299000,
-        agent_limit: 5,
-        inbox_limit: 5,
-        highlight_features: [
-          '5 Agen & 5 Inbox',
-          'WhatsApp Cloud API Resmi',
-          'Instagram Direct & Telegram',
-          'Macro & Basic Automations',
-        ],
-      },
-      {
-        id: 'max',
-        name: 'Max',
-        badge: t('BILLING_SETTINGS.TIER_SELECTION.ADVANCED_BADGE'),
-        description:
-          'Untuk bisnis bertumbuh dengan volume chat tinggi, SLA & AI assist.',
-        price_monthly: 799000,
-        agent_limit: 15,
-        inbox_limit: 20,
-        highlight_features: [
-          '15 Agen & 20 Inbox',
-          'Semua Channel + Shopee',
-          'SLA Management & CSAT',
-          'Conversation Monitors & Auto Assignment',
-          'Captain AI Bot Integration',
-        ],
-      },
-      {
-        id: 'enterprise',
-        name: 'Enterprise (Chat Admin)',
-        badge: t('BILLING_SETTINGS.TIER_SELECTION.ENTERPRISE_BADGE'),
-        description:
-          'Skala korporasi dengan Chat Admin, Custom Roles, Audit Logs & Unlimited.',
-        price_monthly: 1999000,
-        agent_limit: -1,
-        inbox_limit: -1,
-        highlight_features: [
-          'Unlimited Agen & Inbox',
-          'Dedicated Chat Admin Governance',
-          'Custom Roles & Granular Permissions',
-          'Audit Logs & Security Compliance',
-          'Captain AI Full Suite & Custom Tools',
-          'SAML SSO & Prioritas Webhook Routing',
-        ],
-      },
-    ];
-  } finally {
-    isLoading.value = false;
+    // Keep DEFAULT_TIERS
   }
 };
 
@@ -328,9 +332,12 @@ onMounted(() => {
         <div>
           <Button
             class="w-full"
-            :solid="tier.id === 'enterprise' || tier.id === 'max'"
-            :outline="tier.id === 'free' || tier.id === 'small'"
-            :color="tier.id === 'enterprise' ? 'amber' : 'brand'"
+            :variant="
+              tier.id === 'enterprise' || tier.id === 'max'
+                ? 'solid'
+                : 'outline'
+            "
+            :color="tier.id === 'enterprise' ? 'amber' : 'blue'"
             :is-loading="isSubmitting"
             :disabled="isSubmitting || tier.id === activeTier"
             :label="
