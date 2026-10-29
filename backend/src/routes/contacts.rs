@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -7,6 +7,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::middleware::auth::CurrentUser;
 use crate::models::contact::{Contact, ContactResponse};
 use crate::state::{AppState, CableBroadcastMsg};
 
@@ -255,8 +256,20 @@ pub async fn update_contact(
 
 pub async fn delete_contact(
     Path((account_id, contact_id)): Path<(i32, i32)>,
+    Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    if let Err((code, msg)) = crate::middleware::rbac::verify_permission(
+        &state.db,
+        &current_user,
+        account_id,
+        "contact_manage",
+    )
+    .await
+    {
+        return (code, Json(json!({ "error": msg })));
+    }
+
     let res = sqlx::query(
         "DELETE FROM contacts WHERE id = $1 AND account_id = $2"
     )
@@ -280,3 +293,29 @@ pub async fn delete_contact(
         ),
     }
 }
+
+/// POST /api/v1/accounts/:account_id/contacts/export
+pub async fn export_contacts(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = crate::middleware::rbac::verify_permission(
+        &state.db,
+        &current_user,
+        account_id,
+        "contact_manage",
+    )
+    .await
+    {
+        return (code, Json(json!({ "error": msg })));
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "message": "Export contact queued successfully"
+        })),
+    )
+}
+

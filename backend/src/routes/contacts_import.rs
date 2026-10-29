@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Extension, Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info};
 
+use crate::middleware::auth::CurrentUser;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,9 +26,21 @@ pub struct BatchContactsPayload {
 
 pub async fn import_contacts_json(
     Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
     Json(payload): Json<BatchContactsPayload>,
 ) -> impl IntoResponse {
+    if let Err((code, msg)) = crate::middleware::rbac::verify_permission(
+        &state.db,
+        &current_user,
+        account_id,
+        "contact_manage",
+    )
+    .await
+    {
+        return (code, Json(json!({ "error": msg })));
+    }
+
     let mut imported = 0;
     let mut errors = 0;
 
@@ -117,9 +130,21 @@ pub async fn import_contacts_json(
 
 pub async fn import_contacts_csv(
     Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
+    if let Err((code, msg)) = crate::middleware::rbac::verify_permission(
+        &state.db,
+        &current_user,
+        account_id,
+        "contact_manage",
+    )
+    .await
+    {
+        return (code, Json(json!({ "error": msg })));
+    }
+
     let mut csv_content = String::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
