@@ -62,6 +62,84 @@ pub async fn verify_account_access(
     Ok(role)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountUserPermissions {
+    pub role: i32, // 0 = agent, 1 = administrator
+    pub custom_role_id: Option<i64>,
+    pub custom_role_name: Option<String>,
+    pub permissions: Vec<String>,
+}
+
+impl AccountUserPermissions {
+    pub fn is_administrator(&self) -> bool {
+        self.role == 1
+    }
+
+    pub fn has_permission(&self, permission: &str) -> bool {
+        if self.is_administrator() {
+            return true;
+        }
+        // If agent has no custom role assigned, standard agent permissions apply (all standard agent actions allowed)
+        if self.custom_role_id.is_none() {
+            return true;
+        }
+        self.permissions.iter().any(|p| p == permission)
+    }
+}
+
+/// Mengambil role, custom_role_id, dan granular permissions user pada account tertentu
+pub async fn get_account_user_permissions(
+    db: &PgPool,
+    account_id: i32,
+    user_id: i32,
+) -> Result<AccountUserPermissions, (StatusCode, &'static str)> {
+    let row = sqlx::query!(
+        r#"
+        SELECT au.role, au.custom_role_id, cr.name as "custom_role_name?", cr.permissions as "custom_role_permissions?"
+        FROM account_users au
+        LEFT JOIN custom_roles cr ON cr.id = au.custom_role_id
+        WHERE au.account_id = $1 AND au.user_id = $2
+        "#,
+        account_id as i64,
+        user_id as i64
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database query error during authorization"))?;
+
+    match row {
+        Some(r) => Ok(AccountUserPermissions {
+            role: r.role.unwrap_or(0),
+            custom_role_id: r.custom_role_id,
+            custom_role_name: r.custom_role_name,
+            permissions: r.custom_role_permissions.unwrap_or_default(),
+        }),
+        None => Err((StatusCode::FORBIDDEN, "You do not have access to this account")),
+    }
+}
+
+/// Memvalidasi granular permission untuk user pada account
+pub async fn verify_permission(
+    db: &PgPool,
+    current_user: &CurrentUser,
+    account_id: i32,
+    required_permission: &str,
+) -> Result<(), (StatusCode, &'static str)> {
+    if current_user.is_super_admin() {
+        return Ok(());
+    }
+
+    let perms = get_account_user_permissions(db, account_id, current_user.id).await?;
+    if perms.has_permission(required_permission) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            "You are not authorized to perform this action. Permission denied.",
+        ))
+    }
+}
+
 /// Memvalidasi apakah user adalah SuperAdmin
 pub fn require_super_admin(current_user: &CurrentUser) -> Result<(), (StatusCode, &'static str)> {
     if current_user.is_super_admin() {
