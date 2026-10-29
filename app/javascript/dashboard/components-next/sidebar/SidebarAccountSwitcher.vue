@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import ButtonNext from 'next/button/Button.vue';
 import Icon from 'next/icon/Icon.vue';
 import Logo from 'next/icon/Logo.vue';
@@ -27,6 +28,7 @@ const emit = defineEmits(['showCreateAccountModal']);
 const { t } = useI18n();
 const router = useRouter();
 const { accountId, currentAccount } = useAccount();
+const { isAdmin } = useAdmin();
 const currentUser = useMapGetter('getCurrentUser');
 const globalConfig = useMapGetter('globalConfig/get');
 
@@ -36,17 +38,17 @@ const showAccountSwitcher = computed(
   () => userAccounts.value.length > 1 && currentAccount.value.name
 );
 
+const canToggleDropdown = computed(
+  () =>
+    showAccountSwitcher.value ||
+    isAdmin.value ||
+    Boolean(globalConfig.createNewAccountFromDashboard)
+);
+
 const sortedCurrentUserAccounts = computed(() => {
   return [...(currentUser.value.accounts || [])].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-});
-
-const isAdmin = computed(() => {
-  const currentAcc = (currentUser.value.accounts || []).find(
-    a => a.id === accountId.value
-  );
-  return currentAcc?.role === 'administrator';
 });
 
 const currentPlan = computed(() => {
@@ -126,6 +128,12 @@ const navigateToPlanSelection = () => {
   });
 };
 
+const onBadgeClick = () => {
+  if (isAdmin.value) {
+    navigateToPlanSelection();
+  }
+};
+
 const emitNewAccount = () => {
   emit('showCreateAccountModal');
 };
@@ -151,14 +159,14 @@ const emitNewAccount = () => {
         :data-account-id="accountId"
         aria-haspopup="listbox"
         aria-controls="account-options"
-        class="flex items-center gap-2 justify-between w-full rounded-lg px-2 py-1"
+        class="flex items-center gap-2 justify-between w-full rounded-lg px-2 py-1 text-start"
         :class="[
           isOpen && 'bg-n-alpha-1',
-          showAccountSwitcher
+          canToggleDropdown
             ? 'hover:bg-n-alpha-1 cursor-pointer'
             : 'cursor-default',
         ]"
-        @click="() => showAccountSwitcher && toggle()"
+        @click="() => canToggleDropdown && toggle()"
       >
         <div class="flex flex-col items-start min-w-0 flex-grow">
           <div class="flex items-center gap-1.5 w-full">
@@ -169,14 +177,30 @@ const emitNewAccount = () => {
               {{ currentAccount.name }}
             </span>
             <span
-              v-if="showAccountSwitcher"
+              v-if="canToggleDropdown"
               aria-hidden="true"
               class="i-lucide-chevron-down size-3.5 text-n-slate-10 flex-shrink-0"
             />
           </div>
           <span
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase mt-0.5"
-            :class="tierBadgeConfig.classes"
+            role="button"
+            tabindex="0"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase mt-0.5 transition-all duration-150"
+            :class="[
+              tierBadgeConfig.classes,
+              isAdmin
+                ? 'cursor-pointer hover:brightness-95 active:scale-95'
+                : 'cursor-default',
+            ]"
+            :title="
+              isAdmin
+                ? t('SIDEBAR_ITEMS.MANAGE_SERVICE_PLAN', {
+                    tier: tierBadgeConfig.label,
+                  })
+                : undefined
+            "
+            @click.stop="onBadgeClick"
+            @keydown.enter.stop="onBadgeClick"
           >
             <span
               v-if="tierBadgeConfig.icon"
@@ -188,11 +212,11 @@ const emitNewAccount = () => {
         </div>
       </button>
     </template>
-    <DropdownBody
-      v-if="showAccountSwitcher || isCollapsed || isAdmin"
-      class="min-w-80 z-50"
-    >
-      <DropdownSection :title="t('SIDEBAR_ITEMS.SWITCH_ACCOUNT')">
+    <DropdownBody v-if="canToggleDropdown || isCollapsed" class="min-w-80 z-50">
+      <DropdownSection
+        v-if="showAccountSwitcher"
+        :title="t('SIDEBAR_ITEMS.SWITCH_ACCOUNT')"
+      >
         <DropdownItem
           v-for="account in sortedCurrentUserAccounts"
           :id="`account-${account.id}`"
