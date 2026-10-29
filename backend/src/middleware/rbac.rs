@@ -79,11 +79,20 @@ impl AccountUserPermissions {
         if self.is_administrator() {
             return true;
         }
-        // If agent has no custom role assigned, standard agent permissions apply (all standard agent actions allowed)
-        if self.custom_role_id.is_none() {
-            return true;
+        // If agent has an explicit custom role assigned, verify the custom permissions array
+        if self.custom_role_id.is_some() {
+            return self.permissions.iter().any(|p| p == permission);
         }
-        self.permissions.iter().any(|p| p == permission)
+        // If agent has no custom role assigned (standard agent):
+        // Standard agent permissions allow basic conversation operations,
+        // but privileged features (report_manage, contact_manage, knowledge_base_manage)
+        // require an administrator or an explicit custom role.
+        match permission {
+            "conversation_manage"
+            | "conversation_unassigned_manage"
+            | "conversation_participating_manage" => true,
+            _ => false,
+        }
     }
 }
 
@@ -192,6 +201,42 @@ pub async fn account_access_middleware(
 
     Ok(next.run(req).await)
 }
+
+/// Middleware untuk memverifikasi hak akses Report (Administrator atau agen dengan granular 'report_manage' permission)
+pub async fn report_access_middleware(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let current_user = req
+        .extensions()
+        .get::<CurrentUser>()
+        .cloned()
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Unauthorized" }))))?;
+
+    let account_id = extract_account_id_from_path(req.uri().path())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid account ID" }))))?;
+
+    if current_user.is_super_admin() {
+        return Ok(next.run(req).await);
+    }
+
+    let perms = get_account_user_permissions(&state.db, account_id, current_user.id)
+        .await
+        .map_err(|(code, msg)| (code, Json(json!({ "error": msg }))))?;
+
+    if perms.is_administrator() || perms.permissions.iter().any(|p| p == "report_manage") {
+        Ok(next.run(req).await)
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "You are not authorized to view reports. Administrator or 'report_manage' permission required."
+            })),
+        ))
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

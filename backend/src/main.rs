@@ -60,6 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         Ok(pool) => {
             info!("Berhasil terhubung ke database PostgreSQL!");
+            let _ = sqlx::query("ALTER TABLE audits ADD COLUMN IF NOT EXISTS city varchar, ADD COLUMN IF NOT EXISTS country varchar, ADD COLUMN IF NOT EXISTS country_code varchar")
+                .execute(&pool)
+                .await;
             pool
         }
         Err(err) => {

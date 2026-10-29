@@ -153,6 +153,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             post(contacts_import::import_contacts_csv),
         )
         .route(
+            "/contacts/export",
+            post(contacts::export_contacts),
+        )
+        .route(
             "/actions/contact_merge",
             post(contact_merges::merge_contacts),
         )
@@ -243,6 +247,7 @@ pub fn create_router(state: AppState) -> Router<AppState> {
             post(uploads::direct_upload),
         )
         .route("/audit_logs", get(audit_logs::list_audit_logs))
+        .route("/audit_logs/download", get(audit_logs::download_audit_logs_csv))
         .route(
             "/sla_policies",
             get(sla::list_sla_policies).post(sla::create_sla_policy),
@@ -957,6 +962,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
 
     let api_v2 = Router::new()
         .nest("/accounts/:account_id", account_routes_v2)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rbac::report_access_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rbac::account_access_middleware,
