@@ -11,6 +11,15 @@ use crate::middleware::auth::CurrentUser;
 use crate::middleware::rbac::{verify_account_access, AccountRole};
 use crate::state::AppState;
 
+pub const VALID_PERMISSIONS: &[&str] = &[
+    "conversation_manage",
+    "conversation_unassigned_manage",
+    "conversation_participating_manage",
+    "contact_manage",
+    "report_manage",
+    "knowledge_base_manage",
+];
+
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CustomRole {
     pub id: i64,
@@ -22,11 +31,42 @@ pub struct CustomRole {
     pub updated_at: chrono::NaiveDateTime,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateCustomRolePayload {
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct CustomRoleData {
     pub name: Option<String>,
     pub description: Option<String>,
     pub permissions: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CustomRolePayload {
+    pub custom_role: Option<CustomRoleData>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub permissions: Option<Vec<String>>,
+}
+
+impl CustomRolePayload {
+    pub fn get_name(&self) -> Option<String> {
+        self.custom_role
+            .as_ref()
+            .and_then(|c| c.name.clone())
+            .or_else(|| self.name.clone())
+    }
+
+    pub fn get_description(&self) -> Option<String> {
+        self.custom_role
+            .as_ref()
+            .and_then(|c| c.description.clone())
+            .or_else(|| self.description.clone())
+    }
+
+    pub fn get_permissions(&self) -> Option<Vec<String>> {
+        self.custom_role
+            .as_ref()
+            .and_then(|c| c.permissions.clone())
+            .or_else(|| self.permissions.clone())
+    }
 }
 
 fn role_to_json(r: CustomRole) -> serde_json::Value {
@@ -36,9 +76,18 @@ fn role_to_json(r: CustomRole) -> serde_json::Value {
         "name": r.name,
         "description": r.description,
         "permissions": r.permissions,
-        "created_at": r.created_at.and_utc().timestamp(),
-        "updated_at": r.updated_at.and_utc().timestamp()
+        "created_at": r.created_at.and_utc().to_rfc3339(),
+        "updated_at": r.updated_at.and_utc().to_rfc3339()
     })
+}
+
+fn validate_permissions(perms: &[String]) -> Result<(), String> {
+    for p in perms {
+        if !VALID_PERMISSIONS.contains(&p.as_str()) {
+            return Err(format!("Invalid permission: '{}'. Allowed permissions are: {:?}", p, VALID_PERMISSIONS));
+        }
+    }
+    Ok(())
 }
 
 /// GET /api/v1/accounts/:account_id/custom_roles
@@ -75,7 +124,7 @@ pub async fn create_custom_role(
     Path(account_id): Path<i64>,
     Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
-    Json(body): Json<CreateCustomRolePayload>,
+    Json(body): Json<CustomRolePayload>,
 ) -> impl IntoResponse {
     if let Err((code, msg)) =
         verify_account_access(&state.db, &current_user, account_id as i32, AccountRole::Administrator).await
@@ -87,12 +136,17 @@ pub async fn create_custom_role(
         return (code, Json(json!({ "error": msg, "error_code": "TIER_FEATURE_RESTRICTED" })));
     }
 
-    let name = match body.name {
-        Some(n) if !n.trim().is_empty() => n,
+    let name = match body.get_name() {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
         _ => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "Name is required" }))),
     };
 
-    let permissions = body.permissions.unwrap_or_default();
+    let permissions = body.get_permissions().unwrap_or_default();
+    if let Err(err_msg) = validate_permissions(&permissions) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": err_msg })));
+    }
+
+    let desc = body.get_description();
 
     let role = sqlx::query_as::<_, CustomRole>(
         r#"
@@ -103,7 +157,7 @@ pub async fn create_custom_role(
     )
     .bind(account_id)
     .bind(name)
-    .bind(body.description)
+    .bind(desc)
     .bind(&permissions)
     .fetch_one(&state.db)
     .await;
@@ -152,13 +206,23 @@ pub async fn update_custom_role(
     Path((account_id, id)): Path<(i64, i64)>,
     Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
-    Json(body): Json<CreateCustomRolePayload>,
+    Json(body): Json<CustomRolePayload>,
 ) -> impl IntoResponse {
     if let Err((code, msg)) =
         verify_account_access(&state.db, &current_user, account_id as i32, AccountRole::Administrator).await
     {
         return (code, Json(json!({ "error": msg })));
     }
+
+    let permissions = body.get_permissions();
+    if let Some(ref perms) = permissions {
+        if let Err(err_msg) = validate_permissions(perms) {
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": err_msg })));
+        }
+    }
+
+    let name = body.get_name();
+    let desc = body.get_description();
 
     let role = sqlx::query_as::<_, CustomRole>(
         r#"
@@ -171,9 +235,9 @@ pub async fn update_custom_role(
         RETURNING id, account_id, name, description, permissions, created_at, updated_at
         "#,
     )
-    .bind(body.name)
-    .bind(body.description)
-    .bind(body.permissions)
+    .bind(name)
+    .bind(desc)
+    .bind(permissions)
     .bind(account_id)
     .bind(id)
     .fetch_optional(&state.db)
@@ -197,11 +261,25 @@ pub async fn delete_custom_role(
         return (code, Json(json!({ "error": msg })));
     }
 
-    let _ = sqlx::query("DELETE FROM custom_roles WHERE account_id = $1 AND id = $2")
+    // 1. Nullify on account_users so users don't hold dangling role references
+    let _ = sqlx::query("UPDATE account_users SET custom_role_id = NULL WHERE account_id = $1 AND custom_role_id = $2")
         .bind(account_id)
         .bind(id)
         .execute(&state.db)
         .await;
 
-    (StatusCode::OK, Json(json!({ "success": true })))
+    // 2. Delete the custom role
+    let res = sqlx::query("DELETE FROM custom_roles WHERE account_id = $1 AND id = $2")
+        .bind(account_id)
+        .bind(id)
+        .execute(&state.db)
+        .await;
+
+    match res {
+        Ok(_) => (StatusCode::OK, Json(json!({ "success": true }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
 }

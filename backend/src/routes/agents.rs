@@ -31,9 +31,14 @@ pub async fn list_agents(
                    ELSE 'online' 
                END as availability_status,
                au.auto_offline,
-               (u.confirmed_at IS NOT NULL) as confirmed
+               (u.confirmed_at IS NOT NULL) as confirmed,
+               au.custom_role_id,
+               cr.name as "custom_role_name?",
+               cr.description as "custom_role_description?",
+               cr.permissions as "custom_role_permissions?"
         FROM users u
         INNER JOIN account_users au ON au.user_id = u.id
+        LEFT JOIN custom_roles cr ON cr.id = au.custom_role_id
         WHERE au.account_id = $1
         ORDER BY u.id ASC
         "#,
@@ -45,14 +50,29 @@ pub async fn list_agents(
 
     let agents: Vec<AgentResponse> = rows
         .into_iter()
-        .map(|r| AgentResponse {
-            id: r.id,
-            name: r.name,
-            email: r.email,
-            role: r.role.unwrap_or_else(|| "agent".to_string()),
-            availability_status: r.availability_status.unwrap_or_else(|| "online".to_string()),
-            auto_offline: r.auto_offline,
-            confirmed: r.confirmed.unwrap_or(true),
+        .map(|r| {
+            let custom_role = if let (Some(c_id), Some(c_name)) = (r.custom_role_id, r.custom_role_name) {
+                Some(crate::models::agent::CustomRoleBrief {
+                    id: c_id,
+                    name: c_name,
+                    description: r.custom_role_description,
+                    permissions: r.custom_role_permissions.unwrap_or_default(),
+                })
+            } else {
+                None
+            };
+
+            AgentResponse {
+                id: r.id,
+                name: r.name,
+                email: r.email,
+                role: r.role.unwrap_or_else(|| "agent".to_string()),
+                availability_status: r.availability_status.unwrap_or_else(|| "online".to_string()),
+                auto_offline: r.auto_offline,
+                confirmed: r.confirmed.unwrap_or(true),
+                custom_role_id: r.custom_role_id,
+                custom_role,
+            }
         })
         .collect();
 
@@ -136,18 +156,19 @@ pub async fn create_agent(
     let au_res = sqlx::query!(
         r#"
         INSERT INTO account_users (
-            account_id, user_id, role, inviter_id, auto_offline, availability, created_at, updated_at
+            account_id, user_id, role, inviter_id, auto_offline, availability, custom_role_id, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, 0, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, 0, $6, NOW(), NOW())
         ON CONFLICT (account_id, user_id) 
-        DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
+        DO UPDATE SET role = EXCLUDED.role, custom_role_id = EXCLUDED.custom_role_id, updated_at = NOW()
         RETURNING id
         "#,
         account_id as i64,
         user_id as i64,
         role_int,
         current_user.id as i64,
-        body.auto_offline.unwrap_or(true)
+        body.auto_offline.unwrap_or(true),
+        body.custom_role_id
     )
     .fetch_one(&state.db)
     .await;
@@ -162,6 +183,8 @@ pub async fn create_agent(
                 availability_status: "online".to_string(),
                 auto_offline: body.auto_offline.unwrap_or(true),
                 confirmed: true,
+                custom_role_id: body.custom_role_id,
+                custom_role: None,
             };
             (StatusCode::OK, Json(json!(resp)))
         }
@@ -201,18 +224,22 @@ pub async fn update_agent(
         _ => 0,
     });
 
+    let has_custom_role_param = body.custom_role_id.is_some();
     let _ = sqlx::query!(
         r#"
         UPDATE account_users
         SET role = COALESCE($1, role),
             availability = COALESCE($2, availability),
             auto_offline = COALESCE($3, auto_offline),
+            custom_role_id = CASE WHEN $4::bool THEN $5 ELSE custom_role_id END,
             updated_at = NOW()
-        WHERE account_id = $4 AND user_id = $5
+        WHERE account_id = $6 AND user_id = $7
         "#,
         role_int,
         avail_int,
         body.auto_offline,
+        has_custom_role_param,
+        body.custom_role_id,
         account_id as i64,
         agent_id as i64
     )
@@ -230,9 +257,14 @@ pub async fn update_agent(
                    ELSE 'online' 
                END as availability_status,
                au.auto_offline,
-               (u.confirmed_at IS NOT NULL) as confirmed
+               (u.confirmed_at IS NOT NULL) as confirmed,
+               au.custom_role_id,
+               cr.name as "custom_role_name?",
+               cr.description as "custom_role_description?",
+               cr.permissions as "custom_role_permissions?"
         FROM users u
         INNER JOIN account_users au ON au.user_id = u.id
+        LEFT JOIN custom_roles cr ON cr.id = au.custom_role_id
         WHERE au.account_id = $1 AND u.id = $2
         "#,
         account_id as i64,
@@ -243,6 +275,17 @@ pub async fn update_agent(
 
     match updated {
         Ok(Some(r)) => {
+            let custom_role = if let (Some(c_id), Some(c_name)) = (r.custom_role_id, r.custom_role_name) {
+                Some(crate::models::agent::CustomRoleBrief {
+                    id: c_id,
+                    name: c_name,
+                    description: r.custom_role_description,
+                    permissions: r.custom_role_permissions.unwrap_or_default(),
+                })
+            } else {
+                None
+            };
+
             let resp = AgentResponse {
                 id: r.id,
                 name: r.name,
@@ -251,6 +294,8 @@ pub async fn update_agent(
                 availability_status: r.availability_status.unwrap_or_else(|| "online".to_string()),
                 auto_offline: r.auto_offline,
                 confirmed: r.confirmed.unwrap_or(true),
+                custom_role_id: r.custom_role_id,
+                custom_role,
             };
             (StatusCode::OK, Json(json!(resp)))
         }

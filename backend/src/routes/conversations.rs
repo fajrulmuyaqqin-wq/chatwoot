@@ -41,30 +41,114 @@ pub async fn list_conversations(
     let status_filter = query.status.as_deref().unwrap_or("open");
     let assignee_type = query.assignee_type.as_deref().unwrap_or("all");
 
-    // Hitung counts untuk meta
-    let all_count: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0",
-    )
-    .bind(account_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or((0,));
+    // Periksa izin RBAC granular jika user memiliki custom role
+    let user_perms = crate::middleware::rbac::get_account_user_permissions(&state.db, account_id, current_user.id).await.ok();
+    let has_custom_role = user_perms.as_ref().map(|p| !p.is_administrator() && p.custom_role_id.is_some()).unwrap_or(false);
+    let perms = user_perms.unwrap_or(crate::middleware::rbac::AccountUserPermissions {
+        role: 0,
+        custom_role_id: None,
+        custom_role_name: None,
+        permissions: vec![],
+    });
 
-    let unassigned_count: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id IS NULL",
-    )
-    .bind(account_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or((0,));
+    let can_manage_all = !has_custom_role || perms.has_permission("conversation_manage");
+    let can_manage_unassigned = has_custom_role && perms.has_permission("conversation_unassigned_manage");
+    let can_manage_participating = has_custom_role && perms.has_permission("conversation_participating_manage");
 
-    let assigned_count: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id IS NOT NULL",
-    )
-    .bind(account_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or((0,));
+    if has_custom_role && !can_manage_all && !can_manage_unassigned && !can_manage_participating {
+        return (StatusCode::OK, Json(ConversationListResponse {
+            data: ConversationListPayload {
+                meta: ConversationCounts {
+                    mine_count: 0,
+                    unassigned_count: 0,
+                    assigned_count: 0,
+                    all_count: 0,
+                },
+                payload: vec![],
+            },
+        }));
+    }
+
+    // Hitung counts untuk meta dengan granular permission filter
+    let all_count: (i64,) = if !can_manage_all {
+        if can_manage_unassigned {
+            sqlx::query_as(
+                "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND (assignee_id IS NULL OR assignee_id = $2)",
+            )
+            .bind(account_id)
+            .bind(current_user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or((0,))
+        } else {
+            sqlx::query_as(
+                r#"
+                SELECT count(*) FROM conversations
+                WHERE account_id = $1 AND status = 0
+                  AND (assignee_id = $2 OR id IN (SELECT conversation_id FROM conversation_participants WHERE account_id = $1 AND user_id = $2))
+                "#,
+            )
+            .bind(account_id)
+            .bind(current_user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or((0,))
+        }
+    } else {
+        sqlx::query_as(
+            "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0",
+        )
+        .bind(account_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or((0,))
+    };
+
+    let unassigned_count: (i64,) = if !can_manage_all && !can_manage_unassigned {
+        (0,)
+    } else {
+        sqlx::query_as(
+            "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id IS NULL",
+        )
+        .bind(account_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or((0,))
+    };
+
+    let assigned_count: (i64,) = if !can_manage_all {
+        if can_manage_unassigned {
+            sqlx::query_as(
+                "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id = $2",
+            )
+            .bind(account_id)
+            .bind(current_user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or((0,))
+        } else {
+            sqlx::query_as(
+                r#"
+                SELECT count(*) FROM conversations
+                WHERE account_id = $1 AND status = 0
+                  AND (assignee_id = $2 OR id IN (SELECT conversation_id FROM conversation_participants WHERE account_id = $1 AND user_id = $2))
+                "#,
+            )
+            .bind(account_id)
+            .bind(current_user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or((0,))
+        }
+    } else {
+        sqlx::query_as(
+            "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id IS NOT NULL",
+        )
+        .bind(account_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or((0,))
+    };
 
     let mine_count: (i64,) = sqlx::query_as(
         "SELECT count(*) FROM conversations WHERE account_id = $1 AND status = 0 AND assignee_id = $2",
@@ -82,7 +166,108 @@ pub async fn list_conversations(
         _ => 0, // default "open"
     };
 
-    let conversations = if status_filter == "all" {
+    let conversations = if !can_manage_all {
+        if can_manage_unassigned {
+            match assignee_type {
+                "unassigned" => {
+                    sqlx::query_as::<_, Conversation>(
+                        r#"
+                        SELECT * FROM conversations
+                        WHERE account_id = $1 AND status = $2 AND assignee_id IS NULL
+                        ORDER BY last_activity_at DESC
+                        LIMIT $3 OFFSET $4
+                        "#,
+                    )
+                    .bind(account_id)
+                    .bind(status_int)
+                    .bind(per_page)
+                    .bind(offset)
+                    .fetch_all(&state.db)
+                    .await
+                    .unwrap_or_default()
+                }
+                "me" => {
+                    sqlx::query_as::<_, Conversation>(
+                        r#"
+                        SELECT * FROM conversations
+                        WHERE account_id = $1 AND status = $2 AND assignee_id = $3
+                        ORDER BY last_activity_at DESC
+                        LIMIT $4 OFFSET $5
+                        "#,
+                    )
+                    .bind(account_id)
+                    .bind(status_int)
+                    .bind(current_user.id)
+                    .bind(per_page)
+                    .bind(offset)
+                    .fetch_all(&state.db)
+                    .await
+                    .unwrap_or_default()
+                }
+                _ => {
+                    sqlx::query_as::<_, Conversation>(
+                        r#"
+                        SELECT * FROM conversations
+                        WHERE account_id = $1 AND status = $2
+                          AND (assignee_id IS NULL OR assignee_id = $3)
+                        ORDER BY last_activity_at DESC
+                        LIMIT $4 OFFSET $5
+                        "#,
+                    )
+                    .bind(account_id)
+                    .bind(status_int)
+                    .bind(current_user.id)
+                    .bind(per_page)
+                    .bind(offset)
+                    .fetch_all(&state.db)
+                    .await
+                    .unwrap_or_default()
+                }
+            }
+        } else {
+            // can_manage_participating
+            match assignee_type {
+                "unassigned" => vec![],
+                "me" => {
+                    sqlx::query_as::<_, Conversation>(
+                        r#"
+                        SELECT * FROM conversations
+                        WHERE account_id = $1 AND status = $2 AND assignee_id = $3
+                        ORDER BY last_activity_at DESC
+                        LIMIT $4 OFFSET $5
+                        "#,
+                    )
+                    .bind(account_id)
+                    .bind(status_int)
+                    .bind(current_user.id)
+                    .bind(per_page)
+                    .bind(offset)
+                    .fetch_all(&state.db)
+                    .await
+                    .unwrap_or_default()
+                }
+                _ => {
+                    sqlx::query_as::<_, Conversation>(
+                        r#"
+                        SELECT * FROM conversations
+                        WHERE account_id = $1 AND status = $2
+                          AND (assignee_id = $3 OR id IN (SELECT conversation_id FROM conversation_participants WHERE account_id = $1 AND user_id = $3))
+                        ORDER BY last_activity_at DESC
+                        LIMIT $4 OFFSET $5
+                        "#,
+                    )
+                    .bind(account_id)
+                    .bind(status_int)
+                    .bind(current_user.id)
+                    .bind(per_page)
+                    .bind(offset)
+                    .fetch_all(&state.db)
+                    .await
+                    .unwrap_or_default()
+                }
+            }
+        }
+    } else if status_filter == "all" {
         sqlx::query_as::<_, Conversation>(
             r#"
             SELECT * FROM conversations
@@ -213,6 +398,7 @@ pub async fn list_conversations(
 
 pub async fn get_conversation(
     Path((account_id, display_id)): Path<(i32, i32)>,
+    Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let conv = match sqlx::query_as::<_, Conversation>(
@@ -231,6 +417,45 @@ pub async fn get_conversation(
             );
         }
     };
+
+    // Granular permission check jika user memiliki custom role
+    if let Ok(perms) = crate::middleware::rbac::get_account_user_permissions(&state.db, account_id, current_user.id).await {
+        if !perms.is_administrator() && perms.custom_role_id.is_some() {
+            let can_all = perms.has_permission("conversation_manage");
+            let can_unassigned = perms.has_permission("conversation_unassigned_manage");
+            let can_participating = perms.has_permission("conversation_participating_manage");
+
+            let has_access = if can_all {
+                true
+            } else if can_unassigned {
+                conv.assignee_id.is_none() || conv.assignee_id == Some(current_user.id as i32)
+            } else if can_participating {
+                if conv.assignee_id == Some(current_user.id as i32) {
+                    true
+                } else {
+                    let is_part: bool = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM conversation_participants WHERE account_id = $1 AND conversation_id = $2 AND user_id = $3)",
+                    )
+                    .bind(account_id as i64)
+                    .bind(conv.id as i64)
+                    .bind(current_user.id as i64)
+                    .fetch_one(&state.db)
+                    .await
+                    .unwrap_or(false);
+                    is_part
+                }
+            } else {
+                false
+            };
+
+            if !has_access {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "Access denied by custom role permissions" })),
+                );
+            }
+        }
+    }
 
     let sender = if let Some(contact_id) = conv.contact_id {
         sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE id = $1")
