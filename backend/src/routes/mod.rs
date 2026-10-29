@@ -70,6 +70,11 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         )
         .route("/cache_keys", get(accounts::get_cache_keys))
         .route("/cache_keys/", get(accounts::get_cache_keys))
+        .route("/tier", get(accounts::get_tier).post(accounts::set_tier))
+        .route("/tier/", get(accounts::get_tier).post(accounts::set_tier))
+        .route("/subscription", get(accounts::get_subscription).post(accounts::get_subscription))
+        .route("/limits", get(accounts::get_limits))
+        .route("/billing_summary", get(accounts::get_billing_summary))
         .route(
             "/inboxes",
             get(inboxes::list_inboxes).post(inboxes::create_inbox),
@@ -915,7 +920,10 @@ pub fn create_router(state: AppState) -> Router<AppState> {
 
     // Rute API Enterprise (Protected)
     let enterprise_api = Router::new()
-        .route("/accounts/:account_id/limits", get(enterprise_limits::get_account_limits))
+        .route("/accounts/:account_id/limits", get(accounts::get_limits))
+        .route("/accounts/:account_id/subscription", get(accounts::get_subscription).post(accounts::get_subscription))
+        .route("/accounts/:account_id/billing_summary", get(accounts::get_billing_summary))
+        .route("/accounts/:account_id/tier", get(accounts::get_tier).post(accounts::set_tier))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::rbac::account_access_middleware,

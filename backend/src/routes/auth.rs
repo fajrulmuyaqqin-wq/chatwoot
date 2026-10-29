@@ -400,12 +400,14 @@ async fn fetch_user_accounts(db: &sqlx::PgPool, user_id: i64) -> Vec<AuthRespons
         active_at: Option<chrono::NaiveDateTime>,
         availability: i32,
         auto_offline: bool,
+        custom_attributes: Option<serde_json::Value>,
+        limits: Option<serde_json::Value>,
     }
 
     let rows = sqlx::query_as::<_, AccountRow>(
         r#"
         SELECT au.account_id, a.name, a.status, au.role, au.active_at,
-               au.availability, au.auto_offline
+               au.availability, au.auto_offline, a.custom_attributes, a.limits
         FROM account_users au
         JOIN accounts a ON a.id = au.account_id
         WHERE au.user_id = $1
@@ -446,6 +448,8 @@ async fn fetch_user_accounts(db: &sqlx::PgPool, user_id: i64) -> Vec<AuthRespons
                 availability: availability_str.to_string(),
                 availability_status: availability_str.to_string(),
                 auto_offline: r.auto_offline,
+                custom_attributes: r.custom_attributes,
+                limits: r.limits,
             }
         })
         .collect()

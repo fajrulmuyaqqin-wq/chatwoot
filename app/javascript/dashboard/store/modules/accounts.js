@@ -195,6 +195,23 @@ export const actions = {
   getCacheKeys: async () => {
     return AccountAPI.getCacheKeys();
   },
+
+  getTier: async (_context, accountId) => {
+    const response = await AccountAPI.getTier(accountId);
+    return response.data;
+  },
+
+  setTier: async ({ commit, dispatch }, { tier, accountId }) => {
+    commit(types.default.SET_ACCOUNT_UI_FLAG, { isUpdating: true });
+    try {
+      const response = await AccountAPI.setTier(tier, accountId);
+      commit(types.default.EDIT_ACCOUNT, response.data);
+      await dispatch('validityCheck', null, { root: true });
+      return response.data;
+    } finally {
+      commit(types.default.SET_ACCOUNT_UI_FLAG, { isUpdating: false });
+    }
+  },
 };
 
 export const mutations = {

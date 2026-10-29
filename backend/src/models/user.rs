@@ -82,6 +82,10 @@ pub struct AuthResponseAccount {
     pub availability: String,
     pub availability_status: String,
     pub auto_offline: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_attributes: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<serde_json::Value>,
 }
 
 #[allow(dead_code)]
@@ -140,6 +144,8 @@ mod tests {
                     availability: "online".to_string(),
                     availability_status: "online".to_string(),
                     auto_offline: true,
+                    custom_attributes: None,
+                    limits: None,
                 }],
             },
         };

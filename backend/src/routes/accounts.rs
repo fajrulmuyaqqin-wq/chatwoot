@@ -232,6 +232,25 @@ pub async fn get_account(
                 Some(1) => "suspended",
                 _ => "active",
             };
+
+            let custom_attrs = a.custom_attributes.clone().unwrap_or(json!({}));
+            let tier_str = custom_attrs
+                .get("plan_name")
+                .or_else(|| custom_attrs.get("tier"))
+                .and_then(|v| v.as_str());
+
+            let current_tier = tier_str.and_then(crate::services::tier::AccountTier::from_str);
+            let effective_tier = current_tier.unwrap_or(crate::services::tier::AccountTier::Free);
+
+            let mut final_custom_attrs = custom_attrs;
+            if let Some(obj) = final_custom_attrs.as_object_mut() {
+                obj.insert("plan_name".to_string(), json!(effective_tier.as_str()));
+                obj.insert("tier".to_string(), json!(effective_tier.as_str()));
+                obj.insert("tier_name".to_string(), json!(effective_tier.display_name()));
+                obj.insert("badge".to_string(), json!(effective_tier.badge()));
+                obj.insert("is_plan_registered".to_string(), json!(current_tier.is_some()));
+            }
+
             (
                 StatusCode::OK,
                 Json(json!({
@@ -242,49 +261,10 @@ pub async fn get_account(
                     "domain": a.domain,
                     "support_email": a.support_email,
                     "settings": a.settings.unwrap_or(json!({})),
-                    "custom_attributes": a.custom_attributes.unwrap_or(json!({})),
+                    "custom_attributes": final_custom_attrs,
+                    "limits": effective_tier.limits(),
                     "latest_chatwoot_version": "4.1.0",
-                    "features": {
-                        "inbound_emails": true,
-                        "channel_email": true,
-                        "channel_facebook": true,
-                        "channel_twitter": true,
-                        "channel_website": true,
-                        "channel_instagram": true,
-                        "channel_telegram": true,
-                        "campaigns": true,
-                        "campaign_analytics": true,
-                        "sla": true,
-                        "captain_integration": true,
-                        "captain_integration_v2": true,
-                        "custom_tools": true,
-                        "custom_roles": true,
-                        "audit_logs": true,
-                        "help_center": true,
-                        "companies": true,
-                        "advanced_search": true,
-                        "macros": true,
-                        "canned_responses": true,
-                        "labels": true,
-                        "automations": true,
-                        "agent_management": true,
-                        "team_management": true,
-                        "inbox_management": true,
-                        "api_and_webhooks": true,
-                        "saml": true,
-                        "auto_resolve_conversations": true,
-                        "conversation_required_attributes": true,
-                        "advanced_assignment": true,
-                        "assignment_v2": true,
-                        "conversation_monitors": true,
-                        "reports": true,
-                        "custom_attributes": true,
-                        "data_import": true,
-                        "agent_bots": true,
-                        "voice_recorder": true,
-                        "channel_voice": true,
-                        "auto_translate": true
-                    },
+                    "features": effective_tier.features(),
                     "cache_keys": {
                         "label": 0,
                         "inbox": 0,
@@ -427,5 +407,279 @@ pub async fn get_cache_keys(
             }
         })),
     )
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetTierPayload {
+    pub tier: String,
+}
+
+/// GET /api/v1/accounts/:account_id/tier
+pub async fn get_tier(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = verify_account_access(&state.db, &current_user, account_id, AccountRole::Agent).await {
+        return (code, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let acc = sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    match acc {
+        Ok(Some(a)) => {
+            let custom_attrs = a.custom_attributes.unwrap_or(json!({}));
+            let tier_str = custom_attrs
+                .get("plan_name")
+                .or_else(|| custom_attrs.get("tier"))
+                .and_then(|v| v.as_str());
+
+            let current_tier = tier_str.and_then(crate::services::tier::AccountTier::from_str);
+            let is_registered = current_tier.is_some();
+            let effective_tier = current_tier.unwrap_or(crate::services::tier::AccountTier::Free);
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "account_id": a.id,
+                    "account_name": a.name,
+                    "is_registered": is_registered,
+                    "current_tier": effective_tier.as_str(),
+                    "tier_name": effective_tier.display_name(),
+                    "badge": effective_tier.badge(),
+                    "price_monthly": effective_tier.price_monthly(),
+                    "limits": effective_tier.limits(),
+                    "features": effective_tier.features(),
+                    "available_tiers": crate::services::tier::AccountTier::all_tiers_catalog()
+                })),
+            ).into_response()
+        }
+        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Account not found" }))).into_response(),
+    }
+}
+
+/// POST /api/v1/accounts/:account_id/tier (Mendaftarkan atau mengubah paket tier akun)
+pub async fn set_tier(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+    Json(payload): Json<SetTierPayload>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = verify_account_access(&state.db, &current_user, account_id, AccountRole::Administrator).await {
+        return (code, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let target_tier = match crate::services::tier::AccountTier::from_str(&payload.tier) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "Invalid tier. Supported: free, small, max, enterprise" })),
+            ).into_response();
+        }
+    };
+
+    let limits = target_tier.limits();
+    let features = target_tier.features();
+
+    let existing_acc = match sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({ "error": "Account not found" }))).into_response(),
+    };
+
+    let mut custom_attrs = existing_acc.custom_attributes.unwrap_or(json!({}));
+    if let Some(obj) = custom_attrs.as_object_mut() {
+        obj.insert("plan_name".to_string(), json!(target_tier.as_str()));
+        obj.insert("tier".to_string(), json!(target_tier.as_str()));
+        obj.insert("tier_name".to_string(), json!(target_tier.display_name()));
+        obj.insert("badge".to_string(), json!(target_tier.badge()));
+        obj.insert("is_plan_registered".to_string(), json!(true));
+        obj.insert("tier_registered_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
+        obj.insert("subscribed_quantity".to_string(), json!(target_tier.agent_limit()));
+    }
+
+    let updated = sqlx::query_as::<_, Account>(
+        r#"
+        UPDATE accounts
+        SET custom_attributes = $1,
+            limits = $2,
+            updated_at = NOW()
+        WHERE id = $3
+        RETURNING *
+        "#
+    )
+    .bind(&custom_attrs)
+    .bind(&limits)
+    .bind(account_id)
+    .fetch_one(&state.db)
+    .await;
+
+    match updated {
+        Ok(a) => {
+            let status_str = match a.status {
+                Some(1) => "suspended",
+                _ => "active",
+            };
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "status": status_str,
+                    "locale": locale_int_to_code(a.locale),
+                    "domain": a.domain,
+                    "support_email": a.support_email,
+                    "settings": a.settings.unwrap_or(json!({})),
+                    "custom_attributes": custom_attrs,
+                    "limits": limits,
+                    "features": features,
+                    "current_tier": target_tier.as_str(),
+                    "tier_name": target_tier.display_name(),
+                    "badge": target_tier.badge(),
+                    "message": format!("Tier successfully set to {}", target_tier.display_name())
+                })),
+            ).into_response()
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to update tier: {}", e) })),
+            ).into_response()
+        }
+    }
+}
+
+/// GET /enterprise/api/v1/accounts/:account_id/subscription
+/// POST /enterprise/api/v1/accounts/:account_id/subscription
+pub async fn get_subscription(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = verify_account_access(&state.db, &current_user, account_id, AccountRole::Agent).await {
+        return (code, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let acc = sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    match acc {
+        Ok(Some(a)) => {
+            let custom_attrs = a.custom_attributes.unwrap_or(json!({}));
+            let tier_str = custom_attrs
+                .get("plan_name")
+                .or_else(|| custom_attrs.get("tier"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("free");
+
+            let tier = crate::services::tier::AccountTier::from_str(tier_str)
+                .unwrap_or(crate::services::tier::AccountTier::Free);
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "state": "active",
+                    "plan_name": tier.as_str(),
+                    "tier": tier.as_str(),
+                    "tier_name": tier.display_name(),
+                    "badge": tier.badge(),
+                    "limits": tier.limits(),
+                    "features": tier.features(),
+                    "currency_selection_required": false
+                })),
+            ).into_response()
+        }
+        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Account not found" }))).into_response(),
+    }
+}
+
+/// GET /enterprise/api/v1/accounts/:account_id/limits
+pub async fn get_limits(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = verify_account_access(&state.db, &current_user, account_id, AccountRole::Agent).await {
+        return (code, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let acc = sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    match acc {
+        Ok(Some(a)) => {
+            let custom_attrs = a.custom_attributes.unwrap_or(json!({}));
+            let tier_str = custom_attrs
+                .get("plan_name")
+                .or_else(|| custom_attrs.get("tier"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("free");
+
+            let tier = crate::services::tier::AccountTier::from_str(tier_str)
+                .unwrap_or(crate::services::tier::AccountTier::Free);
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "limits": tier.limits()
+                })),
+            ).into_response()
+        }
+        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Account not found" }))).into_response(),
+    }
+}
+
+/// GET /enterprise/api/v1/accounts/:account_id/billing_summary
+pub async fn get_billing_summary(
+    Path(account_id): Path<i32>,
+    Extension(current_user): Extension<CurrentUser>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = verify_account_access(&state.db, &current_user, account_id, AccountRole::Agent).await {
+        return (code, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let acc = sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    match acc {
+        Ok(Some(a)) => {
+            let custom_attrs = a.custom_attributes.unwrap_or(json!({}));
+            let tier_str = custom_attrs
+                .get("plan_name")
+                .or_else(|| custom_attrs.get("tier"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("free");
+
+            let tier = crate::services::tier::AccountTier::from_str(tier_str)
+                .unwrap_or(crate::services::tier::AccountTier::Free);
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "plan_name": tier.display_name(),
+                    "tier": tier.as_str(),
+                    "badge": tier.badge(),
+                    "price_monthly": tier.price_monthly(),
+                    "currency": "IDR",
+                    "status": "active"
+                })),
+            ).into_response()
+        }
+        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Account not found" }))).into_response(),
+    }
 }
 

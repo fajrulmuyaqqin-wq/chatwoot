@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
@@ -24,6 +25,7 @@ defineProps({
 const emit = defineEmits(['showCreateAccountModal']);
 
 const { t } = useI18n();
+const router = useRouter();
 const { accountId, currentAccount } = useAccount();
 const currentUser = useMapGetter('getCurrentUser');
 const globalConfig = useMapGetter('globalConfig/get');
@@ -40,9 +42,88 @@ const sortedCurrentUserAccounts = computed(() => {
   );
 });
 
+const isAdmin = computed(() => {
+  const currentAcc = (currentUser.value.accounts || []).find(
+    a => a.id === accountId.value
+  );
+  return currentAcc?.role === 'administrator';
+});
+
+const currentPlan = computed(() => {
+  return (
+    currentAccount.value?.custom_attributes?.plan_name ||
+    currentAccount.value?.custom_attributes?.tier ||
+    'free'
+  );
+});
+
+const tierBadgeConfig = computed(() => {
+  const plan = currentPlan.value.toLowerCase();
+  switch (plan) {
+    case 'enterprise':
+      return {
+        label: 'Chat Admin',
+        icon: 'i-lucide-shield-check',
+        classes:
+          'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30',
+      };
+    case 'max':
+      return {
+        label: 'Max',
+        icon: 'i-lucide-zap',
+        classes:
+          'bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/30',
+      };
+    case 'small':
+      return {
+        label: 'Small',
+        icon: 'i-lucide-sparkles',
+        classes:
+          'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30',
+      };
+    case 'free':
+    default:
+      return {
+        label: 'Free',
+        icon: null,
+        classes: 'bg-n-slate-3 text-n-slate-11 border border-n-weak',
+      };
+  }
+});
+
+const getAccountTierLabel = planName => {
+  if (!planName) return 'Free';
+  const p = planName.toLowerCase();
+  if (p === 'enterprise') return 'Chat Admin';
+  if (p === 'max') return 'Max';
+  if (p === 'small') return 'Small';
+  return 'Free';
+};
+
+const getAccountTierClasses = planName => {
+  const p = (planName || 'free').toLowerCase();
+  if (p === 'enterprise') {
+    return 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30';
+  }
+  if (p === 'max') {
+    return 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/30';
+  }
+  if (p === 'small') {
+    return 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30';
+  }
+  return 'bg-n-slate-3 text-n-slate-11 border border-n-weak';
+};
+
 const onChangeAccount = newId => {
   const accountUrl = `/app/accounts/${newId}/dashboard`;
   window.location.href = accountUrl;
+};
+
+const navigateToPlanSelection = () => {
+  router.push({
+    name: 'plan_selection',
+    params: { accountId: accountId.value },
+  });
 };
 
 const emitNewAccount = () => {
@@ -70,7 +151,7 @@ const emitNewAccount = () => {
         :data-account-id="accountId"
         aria-haspopup="listbox"
         aria-controls="account-options"
-        class="flex items-center gap-2 justify-between w-full rounded-lg px-2"
+        class="flex items-center gap-2 justify-between w-full rounded-lg px-2 py-1"
         :class="[
           isOpen && 'bg-n-alpha-1',
           showAccountSwitcher
@@ -79,22 +160,36 @@ const emitNewAccount = () => {
         ]"
         @click="() => showAccountSwitcher && toggle()"
       >
-        <span
-          class="text-sm font-medium leading-5 text-n-slate-12 truncate"
-          aria-live="polite"
-        >
-          {{ currentAccount.name }}
-        </span>
-
-        <span
-          v-if="showAccountSwitcher"
-          aria-hidden="true"
-          class="i-lucide-chevron-down size-4 text-n-slate-10 flex-shrink-0"
-        />
+        <div class="flex flex-col items-start min-w-0 flex-grow">
+          <div class="flex items-center gap-1.5 w-full">
+            <span
+              class="text-sm font-medium leading-5 text-n-slate-12 truncate"
+              aria-live="polite"
+            >
+              {{ currentAccount.name }}
+            </span>
+            <span
+              v-if="showAccountSwitcher"
+              aria-hidden="true"
+              class="i-lucide-chevron-down size-3.5 text-n-slate-10 flex-shrink-0"
+            />
+          </div>
+          <span
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase mt-0.5"
+            :class="tierBadgeConfig.classes"
+          >
+            <span
+              v-if="tierBadgeConfig.icon"
+              class="size-3 flex-shrink-0"
+              :class="tierBadgeConfig.icon"
+            />
+            {{ tierBadgeConfig.label }}
+          </span>
+        </div>
       </button>
     </template>
     <DropdownBody
-      v-if="showAccountSwitcher || isCollapsed"
+      v-if="showAccountSwitcher || isCollapsed || isAdmin"
       class="min-w-80 z-50"
     >
       <DropdownSection :title="t('SIDEBAR_ITEMS.SWITCH_ACCOUNT')">
@@ -108,18 +203,18 @@ const emitNewAccount = () => {
           <template #label>
             <div
               :for="account.name"
-              class="text-left rtl:text-right flex gap-2 items-center"
+              class="text-left rtl:text-right flex gap-2 items-center w-full"
             >
               <span
-                class="text-n-slate-12 max-w-36 truncate min-w-0"
+                class="text-n-slate-12 max-w-28 truncate min-w-0"
                 :title="account.name"
               >
                 {{ account.name }}
               </span>
               <div class="flex-shrink-0 w-px h-3 bg-n-strong" />
               <span
-                class="text-n-slate-11 max-w-24 truncate capitalize"
-                :title="account.name"
+                class="text-n-slate-11 text-xs truncate capitalize"
+                :title="account.role"
               >
                 {{
                   account.custom_role_id
@@ -127,12 +222,38 @@ const emitNewAccount = () => {
                     : account.role
                 }}
               </span>
+              <span
+                class="ms-auto text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase flex-shrink-0"
+                :class="
+                  getAccountTierClasses(account.custom_attributes?.plan_name)
+                "
+              >
+                {{ getAccountTierLabel(account.custom_attributes?.plan_name) }}
+              </span>
             </div>
             <Icon
               v-show="account.id === accountId"
               icon="i-lucide-check"
-              class="text-n-teal-11 size-5"
+              class="text-n-teal-11 size-4 flex-shrink-0 ms-1"
             />
+          </template>
+        </DropdownItem>
+      </DropdownSection>
+      <DropdownSection v-if="isAdmin" :title="t('SIDEBAR_ITEMS.SERVICE_PLAN')">
+        <DropdownItem class="cursor-pointer" @click="navigateToPlanSelection">
+          <template #label>
+            <div
+              class="flex items-center gap-2 text-n-brand text-xs font-medium py-0.5"
+            >
+              <span class="i-lucide-sparkles size-3.5 flex-shrink-0" />
+              <span>
+                {{
+                  t('SIDEBAR_ITEMS.MANAGE_SERVICE_PLAN', {
+                    tier: tierBadgeConfig.label,
+                  })
+                }}
+              </span>
+            </div>
           </template>
         </DropdownItem>
       </DropdownSection>

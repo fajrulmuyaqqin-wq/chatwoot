@@ -15,6 +15,7 @@ import NoAccounts from './noAccounts/Index.vue';
 import ShopifySelectAccount from './shopify/SelectAccount.vue';
 import OnboardingAccountDetails from './onboarding/Index.vue';
 import OnboardingInboxSetup from './onboarding/InboxSetup.vue';
+import PlanSelection from './settings/billing/PlanSelection.vue';
 
 export default {
   routes: [
@@ -54,6 +55,14 @@ export default {
         permissions: ['administrator', 'agent', 'custom_role'],
       },
       component: OnboardingInboxSetup,
+    },
+    {
+      path: frontendURL('accounts/:accountId/plan-selection'),
+      name: 'plan_selection',
+      meta: {
+        permissions: ['administrator', 'agent', 'custom_role'],
+      },
+      component: PlanSelection,
     },
     {
       path: frontendURL('accounts/:accountId/suspended'),

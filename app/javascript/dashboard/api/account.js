@@ -22,6 +22,16 @@ class AccountAPI extends ApiClient {
     );
     return response.data.cache_keys;
   }
+
+  getTier(accountId) {
+    const id = accountId || this.accountIdFromRoute;
+    return axios.get(`${this.apiVersion}/accounts/${id}/tier`);
+  }
+
+  setTier(tier, accountId) {
+    const id = accountId || this.accountIdFromRoute;
+    return axios.post(`${this.apiVersion}/accounts/${id}/tier`, { tier });
+  }
 }
 
 export default new AccountAPI();

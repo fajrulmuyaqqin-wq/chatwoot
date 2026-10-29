@@ -117,11 +117,19 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     isAdmin && isShopifyBillingAccount(userAccount)
       ? shopifyBillingRedirect(to.query)
       : '';
+  const isPlanRegistered = Boolean(
+    userAccount?.custom_attributes?.is_plan_registered ||
+      (userAccount?.custom_attributes?.plan_name &&
+        userAccount.custom_attributes.plan_name !== 'none')
+  );
+  const needsPlanSelection =
+    isAdmin && isActive && !isPlanRegistered && !needsShopifyBilling;
   const needsOnboarding =
     ONBOARDING_STEPS.includes(userAccount?.onboarding_step) &&
     isAdmin &&
     isActive &&
-    !needsShopifyBilling;
+    !needsShopifyBilling &&
+    !needsPlanSelection;
 
   if (to.name === 'captain_toolset_install_link') {
     return next({
@@ -151,6 +159,9 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     if (needsShopifyBilling) {
       return next(frontendURL(`accounts/${routeAccountId}/settings/billing`));
     }
+    if (needsPlanSelection) {
+      return next(frontendURL(`accounts/${routeAccountId}/plan-selection`));
+    }
     const target = needsOnboarding
       ? onboardingPath(userAccount?.onboarding_step)
       : 'dashboard';
@@ -164,6 +175,10 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
         ? { shopify_pending_install: to.query.shopify_pending_install }
         : {},
     });
+  }
+
+  if (needsPlanSelection && to.name !== 'plan_selection') {
+    return next(frontendURL(`accounts/${routeAccountId}/plan-selection`));
   }
 
   if (needsOnboarding && !isOnOnboardingView(to)) {
