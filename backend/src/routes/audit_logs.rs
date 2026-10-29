@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -7,6 +7,8 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::middleware::auth::CurrentUser;
+use crate::middleware::rbac::{verify_account_access, AccountRole};
 use crate::models::audit::{Audit, AuditResponse};
 use crate::state::AppState;
 
@@ -19,8 +21,23 @@ pub struct AuditQuery {
 pub async fn list_audit_logs(
     Path(account_id): Path<i32>,
     Query(query): Query<AuditQuery>,
+    Extension(current_user): Extension<CurrentUser>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    if let Err((code, msg)) =
+        verify_account_access(&state.db, &current_user, account_id, AccountRole::Administrator).await
+    {
+        return (code, Json(json!({ "error": msg })));
+    }
+
+    if let Err((code, msg)) =
+        crate::services::tier::verify_feature_access(&state.db, account_id as i64, "audit_logs").await
+    {
+        return (
+            code,
+            Json(json!({ "error": msg, "error_code": "TIER_FEATURE_RESTRICTED" })),
+        );
+    }
     let page = query.page.unwrap_or(1).max(1);
     let per_page: i64 = 25;
     let offset = (page - 1) * per_page;

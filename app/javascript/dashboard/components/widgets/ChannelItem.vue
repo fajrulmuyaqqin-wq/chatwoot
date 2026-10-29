@@ -34,6 +34,13 @@ const isActive = computed(() => {
   if (Object.keys(props.enabledFeatures).length === 0) {
     return false;
   }
+  const featureKey = `channel_${key}`;
+  if (
+    featureKey in props.enabledFeatures &&
+    props.enabledFeatures[featureKey] === false
+  ) {
+    return false;
+  }
   if (key === 'website') {
     return props.enabledFeatures.channel_website;
   }

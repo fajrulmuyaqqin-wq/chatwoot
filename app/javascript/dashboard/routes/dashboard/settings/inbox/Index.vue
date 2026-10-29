@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onActivated, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import Avatar from 'next/avatar/Avatar.vue';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useAccount } from 'dashboard/composables/useAccount';
 import SettingsLayout from '../SettingsLayout.vue';
 import BaseSettingsHeader from '../components/BaseSettingsHeader.vue';
 import {
@@ -22,6 +24,8 @@ const getters = useStoreGetters();
 const store = useStore();
 const { t } = useI18n();
 const { isAdmin } = useAdmin();
+const router = useRouter();
+const { accountId, currentAccount } = useAccount();
 
 const showDeletePopup = ref(false);
 const selectedInbox = ref({});
@@ -40,6 +44,24 @@ const inboxesList = computed(() => {
       channel_identifier: getInboxIdentifier(inbox),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const inboxLimit = computed(() => {
+  const limit = currentAccount.value?.limits?.inboxes;
+  return typeof limit === 'number' ? limit : -1;
+});
+
+const isInboxLimitReached = computed(() => {
+  return (
+    inboxLimit.value > 0 && (inboxesList.value?.length || 0) >= inboxLimit.value
+  );
+});
+
+const limitBadgeText = computed(() => {
+  return t('INBOX_MGMT.LIMIT_BADGE', {
+    current: inboxesList.value?.length || 0,
+    max: inboxLimit.value,
+  });
 });
 
 const filteredInboxesList = computed(() => {
@@ -109,10 +131,35 @@ const openDelete = inbox => {
         <template v-if="inboxesList?.length" #count>
           <span class="text-body-main text-n-slate-11">
             {{ $t('INBOX_MGMT.COUNT', { n: inboxesList.length }) }}
+            <span
+              v-if="inboxLimit > 0"
+              class="ms-1 px-2 py-0.5 rounded-full text-xs font-medium"
+              :class="
+                isInboxLimitReached
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                  : 'bg-n-alpha-2 text-n-slate-11'
+              "
+            >
+              {{ limitBadgeText }}
+            </span>
           </span>
         </template>
         <template #actions>
-          <router-link v-if="isAdmin" :to="{ name: 'settings_inbox_new' }">
+          <Button
+            v-if="isAdmin && isInboxLimitReached"
+            variant="outline"
+            color="amber"
+            size="sm"
+            :label="$t('INBOX_MGMT.UPGRADE_PLAN')"
+            icon="i-lucide-sparkles"
+            @click="
+              router.push({
+                name: 'plan_selection',
+                params: { accountId: accountId },
+              })
+            "
+          />
+          <router-link v-else-if="isAdmin" :to="{ name: 'settings_inbox_new' }">
             <Button :label="$t('SETTINGS.INBOXES.NEW_INBOX')" size="sm" />
           </router-link>
         </template>

@@ -1,9 +1,11 @@
 <script setup>
 import { useAlert } from 'dashboard/composables';
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import Avatar from 'next/avatar/Avatar.vue';
 import { useI18n } from 'vue-i18n';
 import { picoSearch } from '@chatwoot/pico-search';
+import { useAccount } from 'dashboard/composables/useAccount';
 import {
   useStoreGetters,
   useStore,
@@ -19,6 +21,13 @@ import Button from 'dashboard/components-next/button/Button.vue';
 const getters = useStoreGetters();
 const store = useStore();
 const { t } = useI18n();
+const router = useRouter();
+const { accountId, currentAccount } = useAccount();
+
+const agentLimit = computed(() => {
+  const limit = currentAccount.value?.limits?.agents;
+  return typeof limit === 'number' ? limit : -1;
+});
 
 const loading = ref({});
 const showAddPopup = ref(false);
@@ -39,6 +48,17 @@ const deleteMessage = computed(() => {
 });
 
 const agentList = computed(() => getters['agents/getAgents'].value);
+
+const isAgentLimitReached = computed(() => {
+  return agentLimit.value > 0 && agentList.value.length >= agentLimit.value;
+});
+
+const limitBadgeText = computed(() => {
+  return t('AGENT_MGMT.LIMIT_BADGE', {
+    current: agentList.value.length,
+    max: agentLimit.value,
+  });
+});
 
 const filteredAgentList = computed(() => {
   const query = searchQuery.value.trim();
@@ -107,6 +127,17 @@ const showAlertMessage = message => {
 };
 
 const openAddPopup = () => {
+  if (isAgentLimitReached.value) {
+    useAlert(
+      t('AGENT_MGMT.LIMIT_REACHED') ||
+        `Batas agen untuk paket ini telah tercapai (${agentList.value.length}/${agentLimit.value}). Silakan upgrade paket Anda di Plan Selection.`
+    );
+    router.push({
+      name: 'plan_selection',
+      params: { accountId: accountId.value },
+    });
+    return;
+  }
   showAddPopup.value = true;
 };
 const hideAddPopup = () => {
@@ -163,10 +194,36 @@ const confirmDeletion = () => {
         <template v-if="agentList?.length" #count>
           <span class="text-body-main text-n-slate-11">
             {{ $t('AGENT_MGMT.COUNT', { n: agentList.length }) }}
+            <span
+              v-if="agentLimit > 0"
+              class="ms-1 px-2 py-0.5 rounded-full text-xs font-medium"
+              :class="
+                isAgentLimitReached
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                  : 'bg-n-alpha-2 text-n-slate-11'
+              "
+            >
+              {{ limitBadgeText }}
+            </span>
           </span>
         </template>
         <template #actions>
           <Button
+            v-if="isAgentLimitReached"
+            variant="outline"
+            color="amber"
+            size="sm"
+            :label="$t('AGENT_MGMT.UPGRADE_PLAN')"
+            icon="i-lucide-sparkles"
+            @click="
+              router.push({
+                name: 'plan_selection',
+                params: { accountId: accountId },
+              })
+            "
+          />
+          <Button
+            v-else
             :label="$t('AGENT_MGMT.HEADER_BTN_TXT')"
             size="sm"
             @click="openAddPopup"

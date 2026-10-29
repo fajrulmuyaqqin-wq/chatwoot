@@ -1,5 +1,7 @@
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sqlx::PgPool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -339,3 +341,195 @@ impl AccountTier {
         ]
     }
 }
+
+/// Helper to get an account's active tier and registration status
+pub async fn get_account_tier(
+    db: &PgPool,
+    account_id: i64,
+) -> Result<(AccountTier, bool), (StatusCode, String)> {
+    let row = sqlx::query!(
+        "SELECT custom_attributes FROM accounts WHERE id = $1",
+        account_id as i32
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error fetching account tier: {}", e),
+        )
+    })?;
+
+    match row {
+        Some(r) => {
+            let attrs = r.custom_attributes.unwrap_or(json!({}));
+            let tier_str = attrs
+                .get("plan_name")
+                .or_else(|| attrs.get("tier"))
+                .and_then(|v| v.as_str());
+            let is_registered = attrs
+                .get("is_plan_registered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let tier = tier_str
+                .and_then(AccountTier::from_str)
+                .unwrap_or(AccountTier::Free);
+
+            Ok((tier, is_registered || tier_str.is_some()))
+        }
+        None => Err((StatusCode::NOT_FOUND, "Account not found".to_string())),
+    }
+}
+
+/// Verify whether an account can add another agent within their tier's limits
+pub async fn verify_agent_limit(db: &PgPool, account_id: i64) -> Result<(), (StatusCode, String)> {
+    let (tier, _) = get_account_tier(db, account_id).await?;
+    let limit = tier.agent_limit();
+    if limit < 0 {
+        return Ok(()); // Unlimited for Enterprise
+    }
+
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM account_users WHERE account_id = $1",
+        account_id
+    )
+    .fetch_one(db)
+    .await
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
+
+    if count >= limit {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "Batas agen untuk paket {} telah tercapai ({}/{}). Silakan upgrade paket Anda di Plan Selection untuk menambah agen.",
+                tier.display_name(),
+                count,
+                limit
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Verify whether an account can add another inbox within their tier's limits and channel rules
+pub async fn verify_inbox_limit(
+    db: &PgPool,
+    account_id: i64,
+    channel_type: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    let (tier, _) = get_account_tier(db, account_id).await?;
+    let limit = tier.inbox_limit();
+
+    // Verify channel type compatibility first
+    if let Some(ch) = channel_type {
+        let normalized = ch.trim().to_lowercase();
+        match tier {
+            AccountTier::Free => {
+                // Free only supports basic web widget, email, api
+                let allowed = [
+                    "channel::webwidget",
+                    "web_widget",
+                    "channel::email",
+                    "email",
+                    "channel::api",
+                    "api",
+                ];
+                if !allowed.contains(&normalized.as_str()) {
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        format!(
+                            "Channel '{}' tidak tersedia pada paket {}. Silakan upgrade ke Small, Max, atau Enterprise.",
+                            ch,
+                            tier.display_name()
+                        ),
+                    ));
+                }
+            }
+            AccountTier::Small => {
+                // Small supports web, email, api, whatsapp, telegram, instagram, facebook, line, sms
+                // Does NOT support Shopee or voice
+                let forbidden = ["channel::shopee", "shopee", "channel::voice", "voice"];
+                if forbidden.contains(&normalized.as_str()) {
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        format!(
+                            "Channel '{}' hanya tersedia pada paket Max atau Enterprise.",
+                            ch
+                        ),
+                    ));
+                }
+            }
+            AccountTier::Max => {
+                // Max supports all channels except voice/calling (enterprise only)
+                let forbidden = ["channel::voice", "voice", "whatsapp_call"];
+                if forbidden.contains(&normalized.as_str()) {
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        "Channel Voice/Call hanya tersedia pada paket Enterprise (Chat Admin)."
+                            .to_string(),
+                    ));
+                }
+            }
+            AccountTier::Enterprise => {
+                // All channels allowed
+            }
+        }
+    }
+
+    if limit >= 0 {
+        let count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM inboxes WHERE account_id = $1",
+            account_id as i32
+        )
+        .fetch_one(db)
+        .await
+        .unwrap_or(Some(0))
+        .unwrap_or(0);
+
+        if count >= limit {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "Batas inbox untuk paket {} telah tercapai ({}/{}). Silakan upgrade paket Anda di Plan Selection untuk menambah inbox.",
+                    tier.display_name(),
+                    count,
+                    limit
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify whether an account has access to a specific tier feature
+pub async fn verify_feature_access(
+    db: &PgPool,
+    account_id: i64,
+    feature_name: &str,
+) -> Result<(), (StatusCode, String)> {
+    let (tier, _) = get_account_tier(db, account_id).await?;
+    let features = tier.features();
+
+    let is_enabled = features
+        .get(feature_name)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if !is_enabled {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "Fitur '{}' tidak tersedia pada paket {}. Silakan upgrade paket Anda di Plan Selection.",
+                feature_name,
+                tier.display_name()
+            ),
+        ));
+    }
+
+    Ok(())
+}
+

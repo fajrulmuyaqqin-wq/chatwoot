@@ -272,6 +272,10 @@ pub async fn create_assistant(
         return (code, Json(json!({ "error": msg })));
     }
 
+    if let Err((code, msg)) = crate::services::tier::verify_feature_access(&state.db, account_id as i64, "captain_integration").await {
+        return (code, Json(json!({ "error": msg, "error_code": "TIER_FEATURE_RESTRICTED" })));
+    }
+
     let name = body.name.unwrap_or_else(|| "AI Assistant".to_string());
     let config = body.config.unwrap_or_else(|| json!({}));
 

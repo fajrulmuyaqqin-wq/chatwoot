@@ -83,6 +83,10 @@ pub async fn create_custom_role(
         return (code, Json(json!({ "error": msg })));
     }
 
+    if let Err((code, msg)) = crate::services::tier::verify_feature_access(&state.db, account_id, "custom_roles").await {
+        return (code, Json(json!({ "error": msg, "error_code": "TIER_FEATURE_RESTRICTED" })));
+    }
+
     let name = match body.name {
         Some(n) if !n.trim().is_empty() => n,
         _ => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "Name is required" }))),

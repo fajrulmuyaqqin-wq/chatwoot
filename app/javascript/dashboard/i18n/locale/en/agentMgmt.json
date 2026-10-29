@@ -10,6 +10,9 @@
       "AGENT": "Agent"
     },
     "COUNT": "{n} agent | {n} agents",
+    "LIMIT_REACHED": "Agent limit reached for your plan. Please upgrade your plan.",
+    "LIMIT_BADGE": "{current} / {max} Max",
+    "UPGRADE_PLAN": "Upgrade Plan",
     "LIST": {
       "404": "There are no agents associated to this account",
       "TITLE": "Manage agents in your team",

@@ -79,6 +79,10 @@ pub async fn create_agent(
         return (code, Json(json!({ "error": msg })));
     }
 
+    if let Err((code, msg)) = crate::services::tier::verify_agent_limit(&state.db, account_id as i64).await {
+        return (code, Json(json!({ "error": msg, "error_code": "AGENT_LIMIT_EXCEEDED" })));
+    }
+
     let clean_email = body.email.trim().to_lowercase();
     let role_int = match body.role.as_deref() {
         Some("administrator") => 1,

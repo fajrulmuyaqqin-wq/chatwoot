@@ -46,6 +46,15 @@ pub async fn create_sla_policy(
     State(state): State<AppState>,
     Json(payload): Json<CreateSlaPayload>,
 ) -> impl IntoResponse {
+    if let Err((code, msg)) =
+        crate::services::tier::verify_feature_access(&state.db, account_id as i64, "sla").await
+    {
+        return (
+            code,
+            Json(json!({ "error": msg, "error_code": "TIER_FEATURE_RESTRICTED" })),
+        );
+    }
+
     let policy = match sqlx::query_as::<_, SlaPolicy>(
         r#"
         INSERT INTO sla_policies (

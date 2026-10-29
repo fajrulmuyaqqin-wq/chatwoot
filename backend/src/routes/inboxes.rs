@@ -168,6 +168,19 @@ pub async fn create_inbox(
         other => other,
     };
 
+    if let Err((code, msg)) = crate::services::tier::verify_inbox_limit(
+        &state.db,
+        account_id as i64,
+        Some(&channel_type),
+    )
+    .await
+    {
+        return (
+            code,
+            Json(json!({ "error": msg, "error_code": "INBOX_LIMIT_EXCEEDED" })),
+        );
+    }
+
     let inbox = sqlx::query_as::<_, Inbox>(
         r#"
         INSERT INTO inboxes (
