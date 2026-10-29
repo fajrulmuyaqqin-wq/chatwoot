@@ -88,6 +88,28 @@ pub async fn create_account(
         .or(body.account_name)
         .unwrap_or_else(|| format!("{}'s Workspace", current_user.email));
 
+    // Multi-tenant safety: each user is strictly restricted to only 1 account unless SuperAdmin
+    if !current_user.is_super_admin() {
+        let existing_accounts_count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM account_users WHERE user_id = $1",
+            current_user.id as i64
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(Some(0))
+        .unwrap_or(0);
+
+        if existing_accounts_count >= 1 {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "Dalam mode multi-tenant, setiap pengguna hanya diperbolehkan memiliki 1 akun. Hubungi Administrator untuk akses akun lain.",
+                    "error_code": "SINGLE_ACCOUNT_LIMIT_EXCEEDED"
+                })),
+            );
+        }
+    }
+
     // 1. Buat record akun di tabel `accounts`
     let new_account = sqlx::query_as::<_, Account>(
         r#"

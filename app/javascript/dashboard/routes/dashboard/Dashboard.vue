@@ -8,6 +8,7 @@ import UpgradePage from 'dashboard/routes/dashboard/upgrade/UpgradePage.vue';
 
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAlert } from 'dashboard/composables';
 import { useWindowSize } from '@vueuse/core';
 
 import wootConstants from 'dashboard/constants/globals';
@@ -109,6 +110,16 @@ export default {
       this.isMobileSidebarOpen = false;
     },
     openCreateAccountModal() {
+      const currentUser = this.$store.getters.getCurrentUser;
+      const isSuperAdmin = currentUser?.type === 'SuperAdmin';
+      const userAccounts = this.$store.getters.getUserAccounts || [];
+      if (!isSuperAdmin && userAccounts.length >= 1) {
+        useAlert(
+          this.$t('CREATE_ACCOUNT.SAFETY_SINGLE_ACCOUNT_LIMIT') ||
+            'Each user is restricted to 1 account in multi-tenant mode.'
+        );
+        return;
+      }
       this.showAccountModal = false;
       this.showCreateAccountModal = true;
     },

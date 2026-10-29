@@ -5,6 +5,7 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useAlert } from 'dashboard/composables';
 import ButtonNext from 'next/button/Button.vue';
 import Icon from 'next/icon/Icon.vue';
 import Logo from 'next/icon/Logo.vue';
@@ -34,15 +35,25 @@ const globalConfig = useMapGetter('globalConfig/get');
 
 const userAccounts = useMapGetter('getUserAccounts');
 
+const isSuperAdmin = computed(() => currentUser.value?.type === 'SuperAdmin');
+
+const canCreateNewAccount = computed(() => {
+  // Multi-tenant safety: each tenant user is restricted to 1 account, unless SuperAdmin
+  if (isSuperAdmin.value) {
+    return Boolean(globalConfig.createNewAccountFromDashboard);
+  }
+  return (
+    Boolean(globalConfig.createNewAccountFromDashboard) &&
+    userAccounts.value.length === 0
+  );
+});
+
 const showAccountSwitcher = computed(
   () => userAccounts.value.length > 1 && currentAccount.value.name
 );
 
 const canToggleDropdown = computed(
-  () =>
-    showAccountSwitcher.value ||
-    isAdmin.value ||
-    Boolean(globalConfig.createNewAccountFromDashboard)
+  () => showAccountSwitcher.value || isAdmin.value || canCreateNewAccount.value
 );
 
 const sortedCurrentUserAccounts = computed(() => {
@@ -135,6 +146,13 @@ const onBadgeClick = () => {
 };
 
 const emitNewAccount = () => {
+  if (!canCreateNewAccount.value) {
+    useAlert(
+      t('CREATE_ACCOUNT.SAFETY_SINGLE_ACCOUNT_LIMIT') ||
+        'Each user is restricted to 1 account in multi-tenant mode.'
+    );
+    return;
+  }
   emit('showCreateAccountModal');
 };
 </script>
@@ -281,7 +299,7 @@ const emitNewAccount = () => {
           </template>
         </DropdownItem>
       </DropdownSection>
-      <DropdownItem v-if="globalConfig.createNewAccountFromDashboard">
+      <DropdownItem v-if="canCreateNewAccount">
         <ButtonNext
           color="slate"
           variant="faded"

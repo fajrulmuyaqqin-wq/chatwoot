@@ -845,6 +845,7 @@
   "CREATE_ACCOUNT": {
     "NO_ACCOUNT_WARNING": "Uh oh! We could not find any Chatwoot accounts. Please create a new account to continue.",
     "NEW_ACCOUNT": "New Account",
+    "SAFETY_SINGLE_ACCOUNT_LIMIT": "Each user is restricted to 1 account in multi-tenant mode.",
     "SELECTOR_SUBTITLE": "Create a new account",
     "API": {
       "SUCCESS_MESSAGE": "Account created successfully",
